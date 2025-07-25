@@ -49,23 +49,23 @@ Status MemoryAllocatorHeap::Free(Memory* memory) {
 
 #ifdef SENSCORD_SERVER
 /**
- * @brief Serialize the raw data memory area.
- * @param[in] (rawdata_memory) Memory information for raw data.
+ * @brief Serialize from contained memory area.
+ * @param[in] (memory) Contained memory area information.
  * @param[out] (serialized) Serialized memory information.
  * @return Status object.
  */
-Status MemoryAllocatorHeap::ServerSerialize(
-    const RawDataMemory& rawdata_memory,
+Status MemoryAllocatorHeap::Serialize(
+    const MemoryContained& memory,
     std::vector<uint8_t>* serialized) const {
-  return SENSCORD_STATUS_FAIL(
-      kStatusBlockCore, Status::kCauseNotSupported, "not supported");
+  return SENSCORD_STATUS_FAIL(kStatusBlockCore, Status::kCauseNotSupported,
+      "not supported");
 }
 
 /**
  * @brief Initialize the mapping area.
  * @return Status object.
  */
-Status MemoryAllocatorHeap::ClientInitMapping() {
+Status MemoryAllocatorHeap::InitMapping() {
   // do nothing
   return Status::OK();
 }
@@ -74,43 +74,43 @@ Status MemoryAllocatorHeap::ClientInitMapping() {
  * @brief Deinitialize the mapping area.
  * @return Status object.
  */
-Status MemoryAllocatorHeap::ClientExitMapping() {
+Status MemoryAllocatorHeap::ExitMapping() {
   // do nothing
   return Status::OK();
 }
 
 /**
  * @brief Mapping memory with serialized memory information.
- * @param[in] (serialized) Serialized memory information.
- * @param[out] (rawdata_memory) Memory information for raw data.
+ * @param[in] (serialized) Created from Serialize().
+ * @param[out] (memory) Memory informations.
+ *                      Must to be released with ReleaseMapping().
  * @return Status object.
  */
-Status MemoryAllocatorHeap::ClientMapping(
+Status MemoryAllocatorHeap::Mapping(
     const std::vector<uint8_t>& serialized,
-    RawDataMemory* rawdata_memory) {
-  if (rawdata_memory == NULL) {
-    return SENSCORD_STATUS_FAIL(
-        kStatusBlockCore, Status::kCauseInvalidArgument, "invalid parameter");
+    MemoryContained* memory) {
+  if (memory == NULL) {
+    return SENSCORD_STATUS_FAIL(kStatusBlockCore,
+        Status::kCauseInvalidArgument, "invalid parameter");
   }
 
   // same as Allocate
-  Status status = Allocate(serialized.size(), &rawdata_memory->memory);
+  Status status = Allocate(serialized.size(), &memory->memory);
   SENSCORD_STATUS_TRACE(status);
   if (status.ok()) {
-    rawdata_memory->size = serialized.size();
-    rawdata_memory->offset = 0;
+    memory->size = serialized.size();
+    memory->offset = 0;
   }
   return status;
 }
 
 /**
  * @brief Release the mapped area.
- * @param[in] (rawdata_memory) Memory information for raw data.
+ * @param[in] (memory) Mapped memory.
  * @return Status object.
  */
-Status MemoryAllocatorHeap::ClientUnmapping(
-    const RawDataMemory& rawdata_memory) {
-  Status status = Free(rawdata_memory.memory);
+Status MemoryAllocatorHeap::Unmapping(const MemoryContained& memory) {
+  Status status = Free(memory.memory);
   return SENSCORD_STATUS_TRACE(status);
 }
 #endif  // SENSCORD_SERVER

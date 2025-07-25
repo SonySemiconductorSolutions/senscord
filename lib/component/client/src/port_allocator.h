@@ -46,16 +46,16 @@ class PortAllocator : private senscord::util::Noncopyable {
    * @return Status object.
    */
   senscord::Status Mapping(
-      const std::string& allocator_key,
-      const std::vector<uint8_t>& serialized,
-      senscord::RawDataMemory* memory);
+    const std::string& allocator_key,
+    const std::vector<uint8_t>& serialized,
+    senscord::MemoryContained* memory);
 
   /**
    * @brief Unmapping to the virtual address.
    * @param[in] (memory) Virtual memory informations.
    * @return Status object.
    */
-  senscord::Status Unmapping(const senscord::RawDataMemory& memory);
+  senscord::Status Unmapping(const senscord::MemoryContained& memory);
 
   /**
    * @brief Constructor

@@ -10,7 +10,6 @@
 #include <map>
 #include <string>
 #include <vector>
-#include <set>
 
 #include "senscord/senscord_types.h"
 #include "senscord/connection_types.h"

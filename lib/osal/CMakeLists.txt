@@ -30,4 +30,3 @@ if(WIN32)
   add_definitions(-DTARGET_WINDOWS)
   add_subdirectory(windows)
 endif()
-

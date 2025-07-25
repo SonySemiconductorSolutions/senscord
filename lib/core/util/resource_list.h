@@ -67,11 +67,6 @@ class ResourceList {
    */
   Status Release(const std::string& key);
 
-  /**
-   * @brief Releases all resource data.
-   */
-  void ReleaseAll();
-
  private:
   /**
    * @brief A factory that creates an instance of a class.

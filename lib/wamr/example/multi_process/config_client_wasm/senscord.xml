@@ -20,9 +20,6 @@
       </arguments>
     </instance>
     <instance name="pseudo_image_instance" component="component_pseudo_image">
-      <allocators>
-        <allocator key="wasm"/>
-      </allocators>
     </instance>
   </instances>
 

@@ -143,14 +143,11 @@ class PlayerSendIntervalManager : private senscord::util::Noncopyable {
 
   senscord::osal::OSThread* signal_thread_;
   bool is_thread_started_;
-  senscord::osal::OSMutex* mutex_thread_started_;
+  mutable senscord::osal::OSMutex* mutex_thread_started_;
 
   bool is_repeat_;
   uint64_t sleep_time_;
-
-  senscord::osal::OSMutex* mutex_start_position_;
   size_t async_start_position_;
-  bool is_change_posisiton_;
 
   /**
    * @brief Check the state of the thread
@@ -246,13 +243,6 @@ class PlayerSendIntervalManager : private senscord::util::Noncopyable {
    */
   uint64_t GetCorrectionTime(uint64_t sleep_time, uint64_t* prev_timestamp,
       uint64_t* prev_correction) const;
-
-  /**
-   * @brief Get pause state of playback.
-   * @param[in] (port_id) The id of port
-   * @return true: paused, false: not paused
-   */
-  bool IsPaused(int32_t port_id);
 };
 
 #endif  // LIB_COMPONENT_PLAYER_SRC_PLAYER_SEND_INTERVAL_MANAGER_H_

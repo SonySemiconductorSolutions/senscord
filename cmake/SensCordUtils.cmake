@@ -299,7 +299,7 @@ function(set_build_warning_level level)
   set(warning_level "")
   set(CMAKE_CXX_FLAGS_WORK "${CMAKE_CXX_FLAGS}")
 
-  if ("${level}" STREQUAL "${WARNING_LEVEL_CORE}")
+  if (level STREQUAL ${WARNING_LEVEL_CORE})
     if (WIN32)
       set(warning_level "/W4")
     else()

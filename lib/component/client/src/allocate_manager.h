@@ -61,10 +61,10 @@ class AllocateManager : private senscord::util::Noncopyable {
    * @return Status object.
    */
   senscord::Status Mapping(
-      int32_t port_id,
-      const std::string& allocator_key,
-      const std::vector<uint8_t>& serialized,
-      senscord::RawDataMemory* memory);
+    int32_t port_id,
+    const std::string& allocator_key,
+    const std::vector<uint8_t>& serialized,
+    senscord::MemoryContained* memory);
 
   /**
    * @brief Unmapping to the virtual address.
@@ -73,7 +73,7 @@ class AllocateManager : private senscord::util::Noncopyable {
    * @return Status object.
    */
   senscord::Status Unmapping(
-      int32_t port_id, const senscord::RawDataMemory& memory);
+    int32_t port_id, const senscord::MemoryContained& memory);
 
   /**
    * @brief Get the adapter for memory allocator.
@@ -82,7 +82,7 @@ class AllocateManager : private senscord::util::Noncopyable {
    * @return Status object.
    */
   senscord::Status GetAllocateAdapter(
-      const std::string& allocator_key, AllocateAdapter** adapter) const;
+    const std::string& allocator_key, AllocateAdapter** adapter) const;
 
   /**
    * @brief Constructor
@@ -102,7 +102,7 @@ class AllocateManager : private senscord::util::Noncopyable {
    * @return Status object.
    */
   senscord::Status GetPortAllocator(
-      int32_t port_id, PortAllocator** port_allocator) const;
+    int32_t port_id, PortAllocator** port_allocator) const;
 
   // the adapters for memory allocator.
   typedef std::map<std::string, AllocateAdapter*> AllocatorMap;

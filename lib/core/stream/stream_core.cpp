@@ -213,7 +213,6 @@ Status StreamCore::Exit() {
   config_.address.port_type.clear();
   config_.address.port_id = -1;
   CommitLocalStateChange();
-  resources_.ReleaseAll();
   return Status::OK();
 }
 

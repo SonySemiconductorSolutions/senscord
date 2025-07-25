@@ -160,7 +160,7 @@ class PublisherAdapter : public ResourceAdapter {
    */
   Status MemoryMapping(
       const std::string& key, const std::vector<uint8_t>& serialized,
-      RawDataMemory* memory);
+      MemoryContained* memory);
 
   Publisher* publisher_;
   ClientAdapter* client_;

@@ -53,16 +53,13 @@ class Memory : private util::Noncopyable {
 };
 
 /**
- * @brief Memory information for raw data.
+ * @brief The memory area of use.
  */
-struct RawDataMemory {
+struct MemoryContained {
   Memory* memory;     /**< Allocated memory area. */
   size_t size;        /**< Size of data contained. */
   size_t offset;      /**< Offset size from top address of memory area. */
 };
-
-/** @deprecated Use RawDataMemory structure. */
-typedef RawDataMemory MemoryContained;
 
 }  // namespace senscord
 #endif  // SENSCORD_MEMORY_H_

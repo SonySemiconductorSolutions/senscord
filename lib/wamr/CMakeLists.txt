@@ -26,7 +26,7 @@ find_library(
 message(STATUS "WAMR_IWASM_LIBRARY=${WAMR_IWASM_LIBRARY}")
 
 # WASI_SDK_DIR
-if(SENSCORD_SAMPLE)
+if(SENSCORD_TEST_CORE OR SENSCORD_SAMPLE)
   set(WASI_SDK_DIR "/opt/wasi-sdk" CACHE STRING "")
   if(WASI_SDK_DIR)
     get_filename_component(WASI_SDK_DIR ${WASI_SDK_DIR} ABSOLUTE)
@@ -105,9 +105,6 @@ endif()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wformat -Wformat-security -Wshadow")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wconversion -Wsign-conversion")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unused-parameter")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wformat -Wformat-security -Wshadow")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wconversion -Wsign-conversion")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter")
 
 #################################################
 # libiwasm.so
@@ -160,10 +157,6 @@ install(TARGETS senscord_iwasm
 set(PROJECT_SOURCES
     src/senscord_wamr_api.cpp
     src/senscord_wamr_context.cpp
-    src/senscord_wamr_util.cpp
-    src/wasm_allocator_manager.cpp
-    src/wasm_memory_allocator.cpp
-    src/wasm_memory_pool.cpp
 )
 
 if(WIN32)
@@ -198,5 +191,4 @@ add_subdirectory(wasm_allocator)
 
 if(SENSCORD_SAMPLE)
   add_subdirectory(example)
-  add_subdirectory(application)
 endif()

@@ -26,14 +26,8 @@ namespace c_api = senscord::c_api;
 int32_t senscord_property_key_set_channel_id(
     const char* key, uint32_t channel_id,
     char* made_key, uint32_t* length) {
+  SENSCORD_C_API_ARGUMENT_CHECK(key == NULL);
   SENSCORD_C_API_ARGUMENT_CHECK(length == NULL);
-  if (key == NULL) {
-    c_api::SetLastError(SENSCORD_STATUS_FAIL(
-        senscord::kStatusBlockCore, senscord::Status::kCauseInvalidArgument,
-        "key is NULL"));
-    *length = 0;
-    return -1;
-  }
 
   std::string key_make =
       senscord::PropertyUtils::SetChannelId(key, channel_id);

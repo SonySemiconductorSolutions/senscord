@@ -54,7 +54,7 @@ int32_t senscord_frame_get_type(
   SENSCORD_C_API_ARGUMENT_CHECK(type == NULL);
   senscord::FrameCore* frame_ptr =
       c_api::ToPointer<senscord::FrameCore*>(frame);
-  *type = frame_ptr->GetParentStream()->GetType().c_str();
+  *type = frame_ptr->GetType().c_str();
   return 0;
 }
 

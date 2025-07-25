@@ -186,13 +186,39 @@ void ReleaseSensCordVersion(struct senscord_version_t* version) {
 int32_t senscord_core_init(
     senscord_core_t* core) {
   SENSCORD_C_API_ARGUMENT_CHECK(core == NULL);
-  senscord_config_t config = 0;
-  int32_t ret = senscord_config_create(&config);
-  if (ret == 0) {
-    ret = senscord_core_init_with_config(core, config);
-    senscord_config_destroy(config);
+  senscord::Core* tmp_core = new senscord::Core;
+  senscord::Status status = tmp_core->Init();
+  if (!status.ok()) {
+    delete tmp_core;
+    c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
+    return -1;
   }
-  return ret;
+
+  // read config
+  std::string config_path;
+  if (!senscord::util::SearchFileFromEnv(
+      senscord::kSenscordConfigFile, &config_path)) {
+    delete tmp_core;
+    c_api::SetLastError(SENSCORD_STATUS_FAIL(
+        senscord::kStatusBlockCore, senscord::Status::kCauseInvalidArgument,
+        "%s not found.", senscord::kSenscordConfigFile));
+    return -1;
+  }
+  std::vector<c_api::ConverterConfig> converters;
+  status = senscord::c_api::ConfigReader::ReadConverterInfo(
+      config_path, &converters);
+  if (!status.ok()) {
+    delete tmp_core;
+    c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
+    return -1;
+  }
+  senscord::ConverterManager::GetInstance()->Init(converters);
+
+  c_api::CoreHandle* handle = new c_api::CoreHandle;
+  handle->core = tmp_core;
+  handle->senscord_version_cache = NULL;
+  *core = c_api::ToHandle(handle);
+  return 0;
 }
 
 /**
@@ -476,8 +502,18 @@ int32_t senscord_core_open_stream(
     senscord_core_t core,
     const char* stream_key,
     senscord_stream_t* stream) {
-  return senscord_core_open_stream_with_setting(
-      core, stream_key, NULL, stream);
+  SENSCORD_C_API_ARGUMENT_CHECK(core == 0);
+  SENSCORD_C_API_ARGUMENT_CHECK(stream_key == NULL);
+  SENSCORD_C_API_ARGUMENT_CHECK(stream == NULL);
+  c_api::CoreHandle* handle = c_api::ToPointer<c_api::CoreHandle*>(core);
+  senscord::Stream* stream_ptr = NULL;
+  senscord::Status status = handle->core->OpenStream(stream_key, &stream_ptr);
+  if (!status.ok()) {
+    c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
+    return -1;
+  }
+  *stream = c_api::ToHandle(stream_ptr);
+  return 0;
 }
 
 /**
@@ -496,29 +532,58 @@ int32_t senscord_core_open_stream_with_setting(
     senscord_stream_t* stream) {
   SENSCORD_C_API_ARGUMENT_CHECK(core == 0);
   SENSCORD_C_API_ARGUMENT_CHECK(stream_key == NULL);
+  SENSCORD_C_API_ARGUMENT_CHECK(setting == NULL);
   SENSCORD_C_API_ARGUMENT_CHECK(stream == NULL);
+  senscord::OpenStreamSetting tmp_setting = {};
+  tmp_setting.frame_buffering.num = setting->frame_buffering.num;
+  switch (setting->frame_buffering.buffering) {
+    case SENSCORD_BUFFERING_USE_CONFIG:
+      tmp_setting.frame_buffering.buffering = senscord::kBufferingUseConfig;
+      break;
+    case SENSCORD_BUFFERING_DEFAULT:
+      tmp_setting.frame_buffering.buffering = senscord::kBufferingDefault;
+      break;
+    case SENSCORD_BUFFERING_OFF:
+      tmp_setting.frame_buffering.buffering = senscord::kBufferingOff;
+      break;
+    case SENSCORD_BUFFERING_ON:
+      tmp_setting.frame_buffering.buffering = senscord::kBufferingOn;
+      break;
+    default:
+      tmp_setting.frame_buffering.buffering =
+          static_cast<senscord::Buffering>(setting->frame_buffering.buffering);
+      break;
+  }
+  switch (setting->frame_buffering.format) {
+    case SENSCORD_BUFFERING_FORMAT_USE_CONFIG:
+      tmp_setting.frame_buffering.format = senscord::kBufferingFormatUseConfig;
+      break;
+    case SENSCORD_BUFFERING_FORMAT_DEFAULT:
+      tmp_setting.frame_buffering.format = senscord::kBufferingFormatDefault;
+      break;
+    case SENSCORD_BUFFERING_FORMAT_DISCARD:
+      tmp_setting.frame_buffering.format = senscord::kBufferingFormatDiscard;
+      break;
+    case SENSCORD_BUFFERING_FORMAT_OVERWRITE:
+      tmp_setting.frame_buffering.format = senscord::kBufferingFormatOverwrite;
+      break;
+    default:
+      tmp_setting.frame_buffering.format =
+          static_cast<senscord::BufferingFormat>(
+              setting->frame_buffering.format);
+      break;
+  }
+  uint32_t arguments_count =
+      std::min(setting->arguments_count,
+      static_cast<uint32_t>(SENSCORD_STREAM_ARGUMENT_LIST_MAX));
+  for (uint32_t i = 0; i < arguments_count; ++i) {
+    tmp_setting.arguments[setting->arguments[i].name] =
+        setting->arguments[i].value;
+  }
   c_api::CoreHandle* handle = c_api::ToPointer<c_api::CoreHandle*>(core);
   senscord::Stream* stream_ptr = NULL;
-  senscord::Status status;
-  if (setting != NULL) {
-    senscord::OpenStreamSetting tmp_setting = {};
-    tmp_setting.frame_buffering.num = setting->frame_buffering.num;
-    tmp_setting.frame_buffering.buffering =
-        static_cast<senscord::Buffering>(setting->frame_buffering.buffering);
-    tmp_setting.frame_buffering.format =
-        static_cast<senscord::BufferingFormat>(
-            setting->frame_buffering.format);
-    uint32_t arguments_count =
-        std::min(setting->arguments_count,
-                 static_cast<uint32_t>(SENSCORD_STREAM_ARGUMENT_LIST_MAX));
-    for (uint32_t i = 0; i < arguments_count; ++i) {
-      tmp_setting.arguments[setting->arguments[i].name] =
-          setting->arguments[i].value;
-    }
-    status = handle->core->OpenStream(stream_key, tmp_setting, &stream_ptr);
-  } else {
-    status = handle->core->OpenStream(stream_key, &stream_ptr);
-  }
+  senscord::Status status =
+      handle->core->OpenStream(stream_key, tmp_setting, &stream_ptr);
   if (!status.ok()) {
     c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
     return -1;
@@ -548,3 +613,4 @@ int32_t senscord_core_close_stream(
   }
   return 0;
 }
+

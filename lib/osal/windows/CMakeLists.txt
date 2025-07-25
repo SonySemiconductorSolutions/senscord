@@ -73,5 +73,11 @@ add_custom_command(TARGET  ${TARGET_NAME} PRE_BUILD
                    COMMAND ${CMAKE_COMMAND} -E make_directory
                            ${SSDK_LIBRARY_OUT_DIR})
 
+if(SENSCORD_TEST_OSAL)
+  add_custom_command(TARGET  ${TARGET_NAME} PRE_BUILD
+                     COMMAND ${CMAKE_COMMAND} -E make_directory
+                             ${SSDK_BINARY_OUT_DIR})
+endif()
+
 # Install files.
 install_osal(${TARGET_NAME})

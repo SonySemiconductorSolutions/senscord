@@ -125,10 +125,10 @@ void ClientListenerBase::Listening() {
               "[server] failed to create client");
           continue;
         }
-        manager_->Register(client);
         status = client->Start();
-        if (!status.ok()) {
-          manager_->Release(client);
+        if (status.ok()) {
+          manager_->Register(client);
+        } else {
           delete client;
           SENSCORD_SERVER_LOG_ERROR(
               "[server] client initialization failed: %s",
@@ -136,7 +136,7 @@ void ClientListenerBase::Listening() {
         }
       } else {
         // oops
-        SENSCORD_SERVER_LOG_WARNING("%s", status.ToString().c_str());
+        SENSCORD_SERVER_LOG_WARNING(status.ToString().c_str());
       }
     } else if (status.cause() != Status::kCauseTimeout) {
       SENSCORD_SERVER_LOG_ERROR("[server] listener connection failed: %s",

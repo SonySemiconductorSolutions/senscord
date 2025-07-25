@@ -12,7 +12,27 @@
 
 #include "senscord/develop/stream_source.h"
 #include "senscord/osal.h"
-#include "v4l2_accessor.h"
+#include "senscord/v4l2_image/v4l2_image_types.h"
+#include "src/v4l2_accessor.h"
+
+/**
+ * @brief Buffer structure.
+ */
+struct BufferInfo {
+  uint32_t index;               /**< Buffer index. */
+  uint32_t length;              /**< Mmap length. */
+  void* addr;                   /**< Mmap address. */
+  bool used;                    /**< Is used buffer. */
+  senscord::Memory* memory;     /**< Memory. */
+};
+
+/**
+ * @brief Device settings.
+ */
+struct DeviceSettings {
+  std::string device;           /**< Device path. */
+  uint32_t buffer_num;          /**< Buffer number. */
+};
 
 /**
  * @brief V4L2 Image Stream Source.
@@ -75,29 +95,30 @@ class V4L2ImageStreamSource : public senscord::ImageStreamSource {
   virtual senscord::Status Stop();
 
   // properties
-  senscord::Status Get(
-      const std::string& key,
+  senscord::Status Get(const std::string& key,
       senscord::ChannelInfoProperty* property);
 
-  senscord::Status Get(
-      const std::string& key,
+  senscord::Status Get(const std::string& key,
       senscord::FrameRateProperty* property);
 
-  senscord::Status Set(
-      const std::string& key,
-      const senscord::FrameRateProperty* property);
-
-  senscord::Status Get(
-      const std::string& key,
+  senscord::Status Get(const std::string& key,
       senscord::ImageProperty* property);
 
-  senscord::Status Set(
-      const std::string& key,
+  senscord::Status Get(const std::string& key,
+      senscord::ImageSensorFunctionSupportedProperty* property);
+
+  senscord::Status Set(const std::string& key,
       const senscord::ImageProperty* property);
 
-  senscord::Status Get(
-      const std::string& key,
-      senscord::ImageSensorFunctionSupportedProperty* property);
+  senscord::Status Set(const std::string& key,
+      const senscord::FrameRateProperty* property);
+
+  // additional properties
+  senscord::Status Get(const std::string& key,
+      V4L2SampleProperty* property);
+
+  senscord::Status Set(const std::string& key,
+      const V4L2SampleProperty* property);
 
  protected:
   senscord::StreamSourceUtility* util_;
@@ -113,6 +134,13 @@ class V4L2ImageStreamSource : public senscord::ImageStreamSource {
    * @return used buffer number.
    */
   uint32_t GetUsedBufferNum() const;
+
+  /**
+   * @brief Get nano sec timestamp.
+   * @param[in] (time) Structure to convert nano sec.
+   * @return nano sec timestamp.
+   */
+  inline uint64_t GetNsecTimestamp(const struct timeval& time) const;
 
   /**
    * @brief Allocate device buffer.
@@ -132,36 +160,16 @@ class V4L2ImageStreamSource : public senscord::ImageStreamSource {
    */
   senscord::Status SetDeviceParameter();
 
-  /**
-  * @brief Buffer structure.
-  */
-  struct BufferInfo {
-    uint32_t index;               /**< Buffer index. */
-    uint32_t length;              /**< Mmap length. */
-    void* addr;                   /**< Mmap address. */
-    bool used;                    /**< Is used buffer. */
-    senscord::Memory* memory;     /**< Memory. */
-  };
-  std::vector<BufferInfo> buffer_list_;
-  senscord::osal::OSMutex* buffer_mutex_;
-
-  /**
-  * @brief Device settings.
-  */
-  struct DeviceSettings {
-    std::string device;           /**< Device path. */
-    uint32_t buffer_num;          /**< Buffer number. */
-  };
-  DeviceSettings settings_;
-
   V4L2Accessor device_;
+  DeviceSettings settings_;
+  std::vector<BufferInfo> buffer_list_;
 
   uint64_t frame_seq_num_;
   senscord::MemoryAllocator* allocator_;
-
   senscord::ImageProperty image_property_;
   senscord::FrameRateProperty framerate_property_;
 
+  senscord::osal::OSMutex* buffer_mutex_;
   bool is_started_;
   bool is_yuyv_to_nv16_;
 };

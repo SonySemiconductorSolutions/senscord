@@ -75,10 +75,10 @@ class Channel : private util::Noncopyable {
 
   /**
    * @brief Get the raw data with memory use informations.
-   * @param[out] (memory) Memory information for raw data.
+   * @param[out] (memory) Raw data with memory use.
    * @return Status object.
    */
-  virtual Status GetRawDataMemory(RawDataMemory* memory) const = 0;
+  virtual Status GetRawDataMemory(MemoryContained* memory) const = 0;
 
   /**
    * @brief Virtual destructor.

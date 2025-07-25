@@ -238,11 +238,11 @@ Status PublisherAdapter::ReleaseFrame(const FrameInfo& frameinfo) {
     Memory* memory = itr->data_memory;
     MemoryAllocator* allocator = memory->GetAllocator();
     is_memory_shared |= allocator->IsMemoryShared();
-    RawDataMemory rawdata_memory = {};
-    rawdata_memory.memory = itr->data_memory;
-    rawdata_memory.size = itr->data_size;
-    rawdata_memory.offset = itr->data_offset;
-    Status status_unmap = allocator->Unmapping(rawdata_memory);
+    MemoryContained contained = {};
+    contained.memory = itr->data_memory;
+    contained.size = itr->data_size;
+    contained.offset = itr->data_offset;
+    Status status_unmap = allocator->Unmapping(contained);
     if (!status_unmap.ok()) {
       status = status_unmap;
       SENSCORD_SERVER_LOG_WARNING(
@@ -456,15 +456,14 @@ senscord::Status PublisherAdapter::CreateFrameInfo(
     const std::vector<uint8_t>& rawdata = itr->rawdata_info.rawdata;
     if (rawdata.size() > 0) {
       // mapping memory
-      RawDataMemory rawdata_memory = {};
-      Status status = MemoryMapping(
-          itr->allocator_key, rawdata, &rawdata_memory);
+      MemoryContained contained = {};
+      Status status = MemoryMapping(itr->allocator_key, rawdata, &contained);
       if (!status.ok()) {
         return SENSCORD_STATUS_TRACE(status);
       }
-      channel.data_memory = rawdata_memory.memory;
-      channel.data_size = rawdata_memory.size;
-      channel.data_offset = rawdata_memory.offset;
+      channel.data_memory = contained.memory;
+      channel.data_size = contained.size;
+      channel.data_offset = contained.offset;
 
       // copy to memory
       if (itr->rawdata_info.delivering_mode == senscord::kDeliverAllData) {
@@ -504,7 +503,7 @@ bool PublisherAdapter::IsReplyToSendFrame(
  */
 Status PublisherAdapter::MemoryMapping(
     const std::string& key, const std::vector<uint8_t>& serialized,
-    RawDataMemory* memory) {
+    MemoryContained* memory) {
   Status status;
   MemoryAllocator* allocator = NULL;
   Allocators::iterator itr = allocators_.find(key);

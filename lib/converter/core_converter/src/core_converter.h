@@ -119,7 +119,6 @@ class CoreConverterLibrary
 #ifdef SENSCORD_PLAYER
     public StructConverterC<senscord_play_file_info_property_t, PlayFileInfoProperty>,
     public StructConverterC<senscord_play_mode_property_t, PlayModeProperty>,
-    public StructConverterC<senscord_play_pause_property_t, PlayPauseProperty>,
     public StructConverterC<senscord_play_property_t, PlayProperty>,
     public StructConverterC<senscord_play_position_property_t, PlayPositionProperty>,
 #endif  // SENSCORD_PLAYER
@@ -232,13 +231,10 @@ class CoreConverterLibrary
   // PlayModeProperty
   CONVERTER_FUNC(senscord_play_mode_property_t, PlayModeProperty);
 
-  // PlayPauseProperty
-  CONVERTER_FUNC(senscord_play_pause_property_t, PlayPauseProperty);
-
   // PlayProperty
   CONVERTER_FUNC(senscord_play_property_t, PlayProperty);
 
-  // PlayPositionProperty
+  // PlayProperty
   CONVERTER_FUNC(senscord_play_position_property_t, PlayPositionProperty);
 #endif  // SENSCORD_PLAYER
 

@@ -203,11 +203,6 @@ class ConfigurationCore : public Configuration {
   const CoreConfig& GetConfig() const;
 
   /**
-   * @brief Set cofiguration.
-   */
-  void SetConfig(const CoreConfig& config);
-
-  /**
    * @brief Initialize configuration.
    * @return Status object.
    */

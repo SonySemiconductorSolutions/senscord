@@ -4,22 +4,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <utility>    // make_pair
+#include <utility> // make_pair
 #include "senscord/develop/standard_component.h"
-#include "v4l2_image_stream_source.h"
+#include "src/v4l2_image_stream_source.h"
 
 /**
  * @brief The factory of stream sources for pseudo image component.
  */
-class V4L2ImageStreamSourceFactory : public senscord::StreamSourceFactory {
- public:
+class V4L2ImageStreamSourceFactory : public senscord::StreamSourceFactory
+{
+public:
   /**
    * @brief Get the List of supported types.
    * @param[in] (args) Arguments written by senscord.xml.
    * @param[out] (list) List of supported types.
    */
   virtual void GetSupportedList(
-      const senscord::ComponentArgument& args, SourceTypeList* list) {
+      const senscord::ComponentArgument &args, SourceTypeList *list)
+  {
     list->push_back(std::make_pair(senscord::kStreamTypeImage, 0));
   }
 
@@ -30,8 +32,10 @@ class V4L2ImageStreamSourceFactory : public senscord::StreamSourceFactory {
    * @return Status object.
    */
   virtual senscord::Status CreateSource(
-      const SourceType& type, senscord::StreamSource** source) {
-    if (type.first == senscord::kStreamTypeImage) {
+      const SourceType &type, senscord::StreamSource **source)
+  {
+    if (type.first == senscord::kStreamTypeImage)
+    {
       *source = new V4L2ImageStreamSource();
     }
     return senscord::Status::OK();

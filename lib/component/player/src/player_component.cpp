@@ -302,7 +302,7 @@ senscord::Status PlayerComponent::OpenPort(
     status = p_port_data->OpenPort(port_type, port_id,
         component_argument_.composite_buffer_size, args);
     if (status.ok()) {
-      ResetSynchronousPlaySettings();
+      ResetSynchronousPlayPosition();
     } else {
       SENSCORD_STATUS_TRACE(status);
       port_data_list_.erase(port_id);
@@ -464,7 +464,7 @@ senscord::Status PlayerComponent::SetProperty(const std::string& port_type,
         port_type, port_id, key, serialized_property, serialized_size);
 
     if (status.ok() && (key == senscord::kPlayPropertyKey)) {
-      ResetSynchronousPlaySettings();
+      ResetSynchronousPlayPosition();
     }
   }
   return status;
@@ -832,15 +832,14 @@ senscord::Status PlayerComponent::GetTargetPathList(
 }
 
 /**
- * @brief Reset the playback settings of all ports synchronous play.
+ * @brief Reset the playback position of all ports synchronous play.
  */
-void PlayerComponent::ResetSynchronousPlaySettings() {
+void PlayerComponent::ResetSynchronousPlayPosition() {
   std::map<int32_t, PlayerComponentPortData*>::iterator itr;
   if (send_interval_manager_->GetSendManagePortCount() > 1) {
     for (itr = port_data_list_.begin();
         itr != port_data_list_.end(); ++itr) {
       itr->second->SetPlayStartPosition(0);   // correct start_offset
-      itr->second->SetPlayPause(false);
     }
   }
 }

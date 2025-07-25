@@ -46,12 +46,11 @@ static senscord::osal::OSThreadResult WorkerThreadEntry(void* arg) {
 PlayerFrameFileManager::PlayerFrameFileManager(
     senscord::MemoryAllocator* allocator)
     : target_path_(),
-      start_offset_(),
       read_sleep_time_(0),
       allocator_(allocator),
       read_thread_(NULL),
       is_started_(false),
-      mutex_state_(NULL),
+      mutex_started_(NULL),
       mutex_frame_queue_(NULL),
       cond_frame_buffering_(NULL),
       raw_index_(),
@@ -59,15 +58,12 @@ PlayerFrameFileManager::PlayerFrameFileManager(
       play_frames_(),
       channel_list_(),
       raw_index_path_(),
-      start_position_(),
-      is_change_posisiton_(),
-      is_pause_() {
+      start_position_() {
   total_frames_.clear();
   play_frames_.clear();
-  senscord::osal::OSCreateMutex(&mutex_state_);
+  senscord::osal::OSCreateMutex(&mutex_started_);
   senscord::osal::OSCreateMutex(&mutex_frame_queue_);
   senscord::osal::OSCreateCond(&cond_frame_buffering_);
-  senscord::osal::OSCreateCond(&cond_wait_reading_);
 }
 
 /**
@@ -76,14 +72,12 @@ PlayerFrameFileManager::PlayerFrameFileManager(
 PlayerFrameFileManager::~PlayerFrameFileManager() {
   ClearRawIndex();
   ClearChannel();
-  senscord::osal::OSDestroyMutex(mutex_state_);
-  mutex_state_ = NULL;
+  senscord::osal::OSDestroyMutex(mutex_started_);
+  mutex_started_ = NULL;
   senscord::osal::OSDestroyMutex(mutex_frame_queue_);
   mutex_frame_queue_ = NULL;
   senscord::osal::OSDestroyCond(cond_frame_buffering_);
   cond_frame_buffering_ = NULL;
-  senscord::osal::OSDestroyCond(cond_wait_reading_);
-  cond_wait_reading_ = NULL;
 }
 
 /**
@@ -167,99 +161,6 @@ senscord::Status PlayerFrameFileManager::GetFrame(PlayFrame** frame) {
   PlayFrameQueue::iterator itr = frame_queue_.begin();
   *frame = itr->second;
   frame_queue_.erase(itr);
-
-  return senscord::Status::OK();
-}
-
-/**
- * @brief Get the frame by position
- * @param[out] (frame) frame data
- * @param[in] (position) The position of frame
- * @return status object
- */
-senscord::Status PlayerFrameFileManager::GetFrame(
-    PlayFrame** frame, size_t position) {
-  // file discriptor
-  senscord::osal::OSFile* file = NULL;
-
-  PlayFrame* read_frame = new PlayFrame();
-  read_frame->parent = this;
-  const size_t& index = position;
-  read_frame->index = start_offset_ + static_cast<uint32_t>(index);
-  senscord::Status status;
-
-  // set frame information
-  const uint64_t& sequence_number = play_frames_[index].sequence_number;
-
-  // set channel information
-  RecordChannelData::const_iterator itr =
-      play_frames_[index].channels.begin();
-  for (; itr != play_frames_[index].channels.end(); ++itr) {
-    const uint32_t& channel_id = itr->first;
-    const uint64_t& captured_timestamp = itr->second.captured_timestamp;
-    const senscord::RecordDataType& record_type = itr->second.record_type;
-    const std::string& rawdata_type = itr->second.rawdata_type;
-
-    // read channel property
-    const BinaryPropertyList* property_list = NULL;
-    property_list = GetChannelPropertyList(channel_id, sequence_number);
-    if (property_list == NULL) {
-      // In case of a read error, the channel is not output
-      SENSCORD_LOG_DEBUG(
-          "Failed to acquire the channel property : id=%" PRIu32, channel_id);
-      continue;
-    }
-    read_frame->properties.insert(std::make_pair(channel_id, *property_list));
-
-    // read and allocate channel rawdata
-    senscord::Memory* memory = NULL;
-    if (record_type == senscord::kRecordDataTypeRaw) {
-      // raw format
-      status = player::ReadRawFile(
-          allocator_, target_path_, channel_id, sequence_number, &memory);
-    } else {
-      // composite raw format
-      if (file == NULL) {
-        size_t file_size = 0;
-        // file open (Close after reading all channels)
-        status = player::OpenFile(raw_index_path_, &file, &file_size);
-        if (!status.ok()) {
-          SENSCORD_LOG_DEBUG(
-              "OpenFile error: ret=%s", status.ToString().c_str());
-          continue;
-        }
-      }
-
-      // Allocate raw data for the specified channel
-      RawIndexDataWithOffset* raw_index =
-          FindRawIndex(sequence_number, channel_id);
-      status = AllocateCompositeRawData(
-          allocator_, raw_index, &memory, file);
-    }
-    if (!status.ok()) {
-      // In case of a read error, the channel is not output
-      SENSCORD_LOG_DEBUG(
-          "Failed to acquire the channel rawdata :"
-          "[%" PRIu32 "ch] %s", channel_id, status.ToString().c_str());
-      continue;
-    }
-
-    senscord::ChannelRawData channel = {};
-    channel.channel_id = channel_id;
-    channel.data_type = rawdata_type;
-    channel.data_memory = memory;
-    channel.data_size = memory->GetSize();
-    channel.data_offset = 0;
-    channel.captured_timestamp = captured_timestamp;
-    read_frame->frame_info.channels.push_back(channel);
-  }
-
-  // Only for composite raw
-  if (file != NULL) {
-    senscord::osal::OSFclose(file);
-    file = NULL;
-  }
-  *frame = read_frame;
 
   return senscord::Status::OK();
 }
@@ -637,7 +538,6 @@ senscord::Status PlayerFrameFileManager::SetPlaybackRange(
   play_frames_.assign(
       total_frames_.begin() + offset,
       total_frames_.begin() + end_position);
-  start_offset_ = offset;
 
   return senscord::Status::OK();
 }
@@ -696,7 +596,7 @@ void PlayerFrameFileManager::GetChannelInfo(
  */
 void PlayerFrameFileManager::SetThreadStarted(bool is_started) {
   // set state
-  player::AutoLock autolock(mutex_state_);
+  player::AutoLock autolock(mutex_started_);
   is_started_ = is_started;
 }
 
@@ -719,10 +619,6 @@ senscord::Status PlayerFrameFileManager::StartThreading() {
  * @brief Stop a thread
  */
 void PlayerFrameFileManager::StopThreading() {
-  {
-    player::AutoLock autolock(mutex_state_);
-    senscord::osal::OSSignalCond(cond_wait_reading_);
-  }
   // wait for thread stop
   senscord::osal::OSJoinThread(read_thread_, NULL);
 }
@@ -732,7 +628,7 @@ void PlayerFrameFileManager::StopThreading() {
  * @return true: started, false: not started
  */
 bool PlayerFrameFileManager::IsThreadStarted() const {
-  player::AutoLock autolock(mutex_state_);
+  player::AutoLock autolock(mutex_started_);
   return is_started_;
 }
 
@@ -764,21 +660,6 @@ bool PlayerFrameFileManager::IsFrameQueueEmpty() const {
 }
 
 /**
- * @brief Clear the frame queue.
- */
-void PlayerFrameFileManager::ClearFrameQueue() {
-  player::AutoLock autolock(mutex_frame_queue_);
-  while (!frame_queue_.empty()) {
-    PlayFrameQueue::iterator itr = frame_queue_.begin();
-    for (size_t i = 0; i < itr->second->frame_info.channels.size(); ++i) {
-      allocator_->Free(itr->second->frame_info.channels[i].data_memory);
-    }
-    delete itr->second;
-    frame_queue_.erase(itr);
-  }
-}
-
-/**
  * @brief Wait frame buffering.
  */
 void PlayerFrameFileManager::WaitFrameBuffering() const {
@@ -793,24 +674,11 @@ void PlayerFrameFileManager::WaitFrameBuffering() const {
  * @brief Thread that reads and queues frame files.
  */
 void PlayerFrameFileManager::ReadFrameThread() {
+  // file discriptor
+  senscord::osal::OSFile* file = NULL;
+
   size_t read_position = start_position_;
   while (IsThreadStarted()) {
-    {
-      player::AutoLock autolock(mutex_state_);
-      if (IsPaused()) {
-        ClearFrameQueue();
-        senscord::osal::OSWaitCond(cond_wait_reading_, mutex_state_);
-        continue;
-      }
-    }
-    {
-      player::AutoLock autolock(mutex_frame_queue_);
-      if (is_change_posisiton_) {
-        ClearFrameQueue();
-        read_position = start_position_;
-        is_change_posisiton_ = false;
-      }
-    }
     if (IsFrameQueueMax()) {
       uint64_t sleep_time = GetReadSleepTime();
       SENSCORD_LOG_DEBUG("Queue Max: wait=%" PRIu64, sleep_time);
@@ -819,9 +687,82 @@ void PlayerFrameFileManager::ReadFrameThread() {
     }
 
     size_t index = read_position++;
-    PlayFrame* frame = NULL;
-    GetFrame(&frame, index);
+    PlayFrame* frame = new PlayFrame();
+    frame->index = static_cast<uint32_t>(index);
+    senscord::Status status;
+
+    // set frame information
+    const uint64_t& sequence_number = play_frames_[index].sequence_number;
     const uint64_t& sent_time = play_frames_[index].sent_time;
+
+    // set channel information
+    RecordChannelData::const_iterator itr =
+        play_frames_[index].channels.begin();
+    for (; itr != play_frames_[index].channels.end(); ++itr) {
+      const uint32_t& channel_id = itr->first;
+      const uint64_t& captured_timestamp = itr->second.captured_timestamp;
+      const senscord::RecordDataType& record_type = itr->second.record_type;
+      const std::string& rawdata_type = itr->second.rawdata_type;
+
+      // read channel property
+      const BinaryPropertyList* property_list = NULL;
+      property_list = GetChannelPropertyList(channel_id, sequence_number);
+      if (property_list == NULL) {
+        // In case of a read error, the channel is not output
+        SENSCORD_LOG_DEBUG(
+            "Failed to acquire the channel property : id=%" PRIu32, channel_id);
+        continue;
+      }
+      frame->properties.insert(std::make_pair(channel_id, *property_list));
+
+      // read and allocate channel rawdata
+      senscord::Memory* memory = NULL;
+      if (record_type == senscord::kRecordDataTypeRaw) {
+        // raw format
+        status = player::ReadRawFile(
+            allocator_, target_path_, channel_id, sequence_number, &memory);
+      } else {
+        // composite raw format
+        if (file == NULL) {
+          size_t file_size = 0;
+          // file open (Close after reading all channels)
+          status = player::OpenFile(raw_index_path_, &file, &file_size);
+          if (!status.ok()) {
+            SENSCORD_LOG_DEBUG(
+                "OpenFile error: ret=%s", status.ToString().c_str());
+            continue;
+          }
+        }
+
+        // Allocate raw data for the specified channel
+        RawIndexDataWithOffset* raw_index =
+            FindRawIndex(sequence_number, channel_id);
+        status = AllocateCompositeRawData(
+            allocator_, raw_index, &memory, file);
+      }
+      if (!status.ok()) {
+        // In case of a read error, the channel is not output
+        SENSCORD_LOG_DEBUG(
+            "Failed to acquire the channel rawdata :"
+            "[%" PRIu32 "ch] %s", channel_id, status.ToString().c_str());
+        continue;
+      }
+
+      senscord::ChannelRawData channel = {};
+      channel.channel_id = channel_id;
+      channel.data_type = rawdata_type;
+      channel.data_memory = memory;
+      channel.data_size = memory->GetSize();
+      channel.data_offset = 0;
+      channel.captured_timestamp = captured_timestamp;
+      frame->frame_info.channels.push_back(channel);
+    }
+
+    // Only for composite raw
+    if (file != NULL) {
+      senscord::osal::OSFclose(file);
+      file = NULL;
+    }
 
     {
       player::AutoLock autolock(mutex_frame_queue_);
@@ -837,7 +778,18 @@ void PlayerFrameFileManager::ReadFrameThread() {
   }  // while (IsThreadStarted())
 
   // release the remaining frames.
-  ClearFrameQueue();
+  while (!frame_queue_.empty()) {
+    PlayFrameQueue::iterator itr = frame_queue_.begin();
+
+    // Release allocated rawdata memory
+    for (size_t i = 0; i < itr->second->frame_info.channels.size(); ++i) {
+      allocator_->Free(itr->second->frame_info.channels[i].data_memory);
+    }
+
+    // Release frame data
+    delete itr->second;
+    frame_queue_.erase(itr);
+  }
 }
 
 /**
@@ -845,9 +797,7 @@ void PlayerFrameFileManager::ReadFrameThread() {
  * @param[in] (position) Playback start position to set.
  */
 void PlayerFrameFileManager::SetPlayStartPosition(const uint32_t position) {
-  player::AutoLock autolock(mutex_frame_queue_);
   start_position_ = position;
-  is_change_posisiton_ = true;
 }
 
 /**
@@ -941,23 +891,4 @@ void PlayerFrameFileManager::SetReadSleepTime(
  */
 uint64_t PlayerFrameFileManager::GetReadSleepTime() const {
   return read_sleep_time_;
-}
-
-/**
- * @brief Set the playback pause state.
- * @param[in] (paused) Playback pause state to set.
- */
-void PlayerFrameFileManager::SetPause(bool is_pause) {
-  player::AutoLock autolock(mutex_state_);
-  is_pause_ = is_pause;
-  senscord::osal::OSSignalCond(cond_wait_reading_);
-}
-
-/**
- * @brief Get pause state of playback.
- * @return true: paused, false: not paused
- */
-bool PlayerFrameFileManager::IsPaused() const {
-  player::AutoLock autolock(mutex_state_);
-  return is_pause_;
 }

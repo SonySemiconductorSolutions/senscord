@@ -1742,7 +1742,7 @@ Status WsConnection::GetChannelRawData(
         Status::kCauseInvalidArgument, "rawdata is null");
   }
 
-  RawDataMemory rawdata_memory = {};
+  MemoryContained rawdata_memory = {};
   Status status = channel->GetRawDataMemory(&rawdata_memory);
   if (!status.ok()) {
     LOG_E("%s", status.ToString().c_str());

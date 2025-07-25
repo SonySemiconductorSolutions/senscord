@@ -55,7 +55,7 @@ senscord::Status PortAllocator::Exit() {
 senscord::Status PortAllocator::Mapping(
     const std::string& allocator_key,
     const std::vector<uint8_t>& serialized,
-    senscord::RawDataMemory* memory) {
+    senscord::MemoryContained* memory) {
   AllocateAdapter* adapter = NULL;
   AllocatorMap::iterator itr = allocators_.find(allocator_key);
   if (itr == allocators_.end()) {
@@ -89,7 +89,7 @@ senscord::Status PortAllocator::Mapping(
  * @return Status object.
  */
 senscord::Status PortAllocator::Unmapping(
-    const senscord::RawDataMemory& memory) {
+    const senscord::MemoryContained& memory) {
   std::string allocator_key = memory.memory->GetAllocator()->GetKey();
   AllocatorMap::iterator itr = allocators_.find(allocator_key);
   if (itr == allocators_.end()) {

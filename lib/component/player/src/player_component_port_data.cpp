@@ -15,7 +15,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include <set>
 
 #include "senscord/logger.h"
 #include "./player_component_util.h"
@@ -67,7 +66,6 @@ PlayerComponentPortData::PlayerComponentPortData(
   senscord::osal::OSCreateMutex(&mutex_state_);
   senscord::osal::OSCreateMutex(&mutex_started_);
   senscord::osal::OSCreateMutex(&mutex_position_);
-  senscord::osal::OSCreateMutex(&mutex_frames_);
   player::ClearPlayProperty(&play_setting_);
 
   // Use only if the rate was obtained before the record file was specified.
@@ -79,9 +77,6 @@ PlayerComponentPortData::PlayerComponentPortData(
  * @brief Destructor.
  */
 PlayerComponentPortData::~PlayerComponentPortData() {
-  senscord::osal::OSDestroyMutex(mutex_frames_);
-  mutex_frames_ = NULL;
-
   senscord::osal::OSDestroyMutex(mutex_position_);
   mutex_position_ = NULL;
 
@@ -175,20 +170,6 @@ senscord::Status PlayerComponentPortData::OpenPort(
  */
 senscord::Status PlayerComponentPortData::ClosePort(
     const std::string& port_type, int32_t port_id) {
-  // release all frames
-  {
-    player::AutoLock autolock(mutex_frames_);
-    std::map<PlayFrame*, SentSeqNumList>::iterator itr = sent_frames_.begin();
-    for (; itr != sent_frames_.end(); ++itr) {
-      PlayFrame* frame = itr->first;
-      SENSCORD_LOG_DEBUG("deleted:%p, index=%" PRIu32,
-          frame, frame->index);
-      ReleaseFrame(frame->frame_info);
-      delete frame;
-    }
-    sent_frames_.clear();
-  }
-
   player::AutoLock autolock(mutex_state_);
 
   player_component_->UnregisterProperties(port_type, port_id);
@@ -334,6 +315,10 @@ senscord::Status PlayerComponentPortData::SetProperty(
         return SENSCORD_STATUS_FAIL(
             kModuleName, senscord::Status::kCauseNotSupported,
             "Not supported synchronous playback");
+      } else if (IsThreadStarted()) {
+        return SENSCORD_STATUS_FAIL(
+            kModuleName, senscord::Status::kCauseInvalidOperation,
+            "Already started");
       }
       SetPlayStartPosition(prop.position);
     }
@@ -350,25 +335,6 @@ senscord::Status PlayerComponentPortData::SetProperty(
     status = SENSCORD_STATUS_FAIL(
         kModuleName, senscord::Status::kCauseNotSupported,
         "SetProperty(key='%s') is not supported.", key.c_str());
-  } else if (key == senscord::kPlayPausePropertyKey) {
-    senscord::serialize::Decoder decoder(serialized_property, serialized_size);
-    senscord::PlayPauseProperty prop = {};
-    status = decoder.Pop(prop);
-    SENSCORD_STATUS_TRACE(status);
-    if (status.ok()) {
-      if (frame_file_manager_ == NULL) {
-        // playback file not specified
-        return SENSCORD_STATUS_FAIL(
-            kModuleName, senscord::Status::kCauseInvalidOperation,
-            "Incomplete playback parameters.");
-      } else if (send_interval_manager_->GetSendManagePortCount() > 1) {
-        // synchronous playback
-        return SENSCORD_STATUS_FAIL(
-            kModuleName, senscord::Status::kCauseNotSupported,
-            "Not supported synchronous playback");
-      }
-      SetPlayPause(prop.pause);
-    }
   } else if (key == senscord::kFrameRatePropertyKey) {
     senscord::serialize::Decoder decoder(serialized_property, serialized_size);
     senscord::FrameRateProperty property = {};
@@ -497,25 +463,6 @@ senscord::Status PlayerComponentPortData::GetProperty(
           kModuleName, senscord::Status::kCauseInvalidOperation,
           "Incomplete playback parameters.");
     }
-  } else if (key == senscord::kPlayPausePropertyKey) {
-    if (stream_file_manager_ != NULL && frame_file_manager_ != NULL) {
-      senscord::PlayPauseProperty prop = {};
-      prop.pause = frame_file_manager_->IsPaused();
-      senscord::serialize::SerializedBuffer buffer;
-      senscord::serialize::Encoder encoder(&buffer);
-      status = encoder.Push(prop);
-      SENSCORD_STATUS_TRACE(status);
-      if (status.ok()) {
-        *serialized_size = buffer.size();
-        *serialized_property = new uint8_t[*serialized_size]();
-        senscord::osal::OSMemcpy(*serialized_property, *serialized_size,
-                                 buffer.data(), buffer.size());
-      }
-    } else {
-      status = SENSCORD_STATUS_FAIL(
-          kModuleName, senscord::Status::kCauseInvalidOperation,
-          "Incomplete playback parameters.");
-    }
   } else if (key == senscord::kFrameRatePropertyKey) {
     senscord::serialize::SerializedBuffer buffer;
     senscord::serialize::Encoder encoder(&buffer);
@@ -617,7 +564,7 @@ void PlayerComponentPortData::SendFrameThread() {
     }
 
     PlayFrame* frame = NULL;
-    status = GetFrame(&frame);
+    status = frame_file_manager_->GetFrame(&frame);
     if (!status.ok()) {
       SENSCORD_LOG_WARNING("Failed to get the frame : ret=%s",
         status.ToString().c_str());
@@ -628,54 +575,11 @@ void PlayerComponentPortData::SendFrameThread() {
           status.ToString().c_str());
       }
     }
+
+    delete frame;
   }  // while (1)
 
   send_interval_manager_->SetFrameWait(port_id_, false);
-}
-
-/**
- * @brief Get frame.
- * @param[out] (frame) frame data.
- * @return Status object.
- */
-senscord::Status PlayerComponentPortData::GetFrame(PlayFrame** frame) {
-  senscord::Status status;
-  player::AutoLock frame_lock(mutex_frames_);
-  if (IsPlayPaused() || frame_file_manager_->GetPlayCount() == 1) {
-    uint32_t abs_index = 0;
-    {
-      player::AutoLock position_lock(mutex_position_);
-      abs_index = latest_position_;
-    }
-    // find target frame from the sent frames
-    std::map<PlayFrame*, SentSeqNumList>::iterator itr = sent_frames_.begin();
-    for ( ; itr != sent_frames_.end(); ++itr) {
-      PlayFrame* tmp_frame = itr->first;
-      if (tmp_frame->index == abs_index &&
-          tmp_frame->parent == frame_file_manager_) {
-        *frame = tmp_frame;
-        break;
-      }
-    }
-    // not found, get frame by position
-    if (*frame == NULL) {
-      status = frame_file_manager_->GetFrame(
-          frame, abs_index - play_setting_.start_offset);
-    }
-  } else {
-    // get latest frame
-    status = frame_file_manager_->GetFrame(frame);
-  }
-
-  if (status.ok()) {
-    (*frame)->frame_info.sequence_number = sequence_number_++;
-    sent_frames_[(*frame)].insert((*frame)->frame_info.sequence_number);
-    SENSCORD_LOG_DEBUG("GetFrame: frame=%p, seq_num=%" PRIu64
-        ", index=%" PRIu32,
-        *frame, (*frame)->frame_info.sequence_number,
-        (*frame)->index);
-  }
-  return status;
 }
 
 /**
@@ -684,62 +588,13 @@ senscord::Status PlayerComponentPortData::GetFrame(PlayFrame** frame) {
  */
 void PlayerComponentPortData::ReleasePortFrame(
     const senscord::FrameInfo& frameinfo) {
-  SENSCORD_LOG_DEBUG("ReleaseFrame: seq_num=%" PRIu64,
-      frameinfo.sequence_number);
-  uint32_t abs_index = 0;
-  {
-    player::AutoLock position_lock(mutex_position_);
-    abs_index = latest_position_;
-  }
-
-  // find unreferenced frame from the sent frames
-  player::AutoLock frame_lock(mutex_frames_);
-  std::set<PlayFrame*> unref_frames;
-  {
-    std::map<PlayFrame*, SentSeqNumList>::iterator frame_itr =
-        sent_frames_.begin();
-    for ( ; frame_itr != sent_frames_.end(); ++frame_itr) {
-      SentSeqNumList::iterator seq_itr = frame_itr->second.begin();
-      for (; seq_itr != frame_itr->second.end(); ++seq_itr) {
-        if (*seq_itr == frameinfo.sequence_number) {
-          frame_itr->second.erase(seq_itr);
-          break;
-        }
-      }
-      if (frame_itr->second.empty()) {
-        unref_frames.insert(frame_itr->first);
-      }
-    }
-  }
-
-  // release frame
-  {
-    std::set<PlayFrame*>::iterator frame_itr = unref_frames.begin();
-    for ( ; frame_itr != unref_frames.end(); ++frame_itr) {
-      PlayFrame* unref_frame = *frame_itr;
-      if (unref_frame->index != abs_index ||
-          unref_frame->parent != frame_file_manager_) {
-        SENSCORD_LOG_DEBUG("ReleaseFrame: delete=%p, index=%" PRIu32,
-            unref_frame, unref_frame->index);
-        ReleaseFrame(unref_frame->frame_info);
-        sent_frames_.erase(unref_frame);
-        delete unref_frame;
-      }
-    }
-  }
-}
-
-/**
- * @brief Release the frame memory.
- * @param[in] (frameinfo) Infomation to release frame.
- */
-void PlayerComponentPortData::ReleaseFrame(
-    const senscord::FrameInfo& frameinfo) {
-  std::vector<senscord::ChannelRawData>::const_iterator ch_itr =
+  std::vector<senscord::ChannelRawData>::const_iterator itr =
       frameinfo.channels.begin();
-  for (; ch_itr != frameinfo.channels.end(); ++ch_itr) {
-    if (ch_itr->data_memory != NULL) {
-      allocator_->Free(ch_itr->data_memory);
+  std::vector<senscord::ChannelRawData>::const_iterator end =
+      frameinfo.channels.end();
+  for (; itr != end; ++itr) {
+    if (itr->data_memory != NULL) {
+      allocator_->Free(itr->data_memory);
     }
   }
 }
@@ -759,7 +614,6 @@ senscord::Status PlayerComponentPortData::RegisterPlayProperties(
   key_list.push_back(senscord::kPlayModePropertyKey);
   key_list.push_back(senscord::kPlayFileInfoPropertyKey);
   key_list.push_back(senscord::kPlayPositionPropertyKey);
-  key_list.push_back(senscord::kPlayPausePropertyKey);
   key_list.push_back(senscord::kFrameRatePropertyKey);
   key_list.push_back(senscord::kChannelInfoPropertyKey);
   status = player_component_->RegisterProperties(port_type, port_id, key_list);
@@ -843,9 +697,7 @@ senscord::Status PlayerComponentPortData::SetupPlayManager(
   if (stream_file_manager_ != NULL) {
     delete stream_file_manager_;
   }
-  bool paused = false;
   if (frame_file_manager_ != NULL) {
-    paused = frame_file_manager_->IsPaused();
     delete frame_file_manager_;
   }
 
@@ -855,17 +707,13 @@ senscord::Status PlayerComponentPortData::SetupPlayManager(
   stream_file_manager_ = stream_file_manager;
   frame_file_manager_ = frame_file_manager;
   play_setting_ = play_property;
-  if (is_diff_file_path) {
-    framerate_ = frame_rate_property;
-    paused = false;
-  }
+  framerate_ = frame_rate_property;
   send_interval_manager_->SetupSendIntervalManager(
       port_id_, frame_file_manager_->GetSentTimeList(), this);
   send_interval_manager_->SetFrameRate(
       port_id, framerate_.num, framerate_.denom);
   send_interval_manager_->SetRepeatMode(play_property.mode.repeat);
   frame_file_manager_->SetReadSleepTime(framerate_.num, framerate_.denom);
-  frame_file_manager_->SetPause(paused);
   if (is_diff_file_path) {
     // reset start position
     SetPlayStartPosition(play_setting_.start_offset);
@@ -1002,7 +850,7 @@ senscord::Status PlayerComponentPortData::SendFrame(
   uint32_t position = 0;
   {
     player::AutoLock autolock(mutex_position_);
-    position = latest_position_ = frame->index;
+    position = latest_position_ = play_setting_.start_offset + frame->index;
   }
   for (std::vector<senscord::ChannelRawData>::const_iterator
       itr = frame->frame_info.channels.begin(),
@@ -1012,6 +860,7 @@ senscord::Status PlayerComponentPortData::SendFrame(
   }
 
   // send frame
+  frame->frame_info.sequence_number = sequence_number_++;
   status = player_component_->SendFrame(port_id, frame->frame_info);
   if (!status.ok()) {
     SENSCORD_LOG_WARNING("[%s] SendFrame NG(% " PRIu64 ") : ret=%s",
@@ -1067,22 +916,4 @@ void PlayerComponentPortData::SetPlayStartPosition(uint32_t position) {
           latest_position_ - play_setting_.start_offset);
     }
   }
-}
-
-/**
- * @brief Set the playback pause state.
- * @param[in] (pause) Playback pause state to set
- */
-void PlayerComponentPortData::SetPlayPause(bool pause) {
-  if (IsPlayPaused() && !pause) {
-    // resume playback, set the next position
-    SetPlayStartPosition(latest_position_ + 1);
-  }
-  if (frame_file_manager_ != NULL) {
-    frame_file_manager_->SetPause(pause);
-  }
-}
-
-bool PlayerComponentPortData::IsPlayPaused() const {
-  return frame_file_manager_ ? frame_file_manager_->IsPaused() : false;
 }

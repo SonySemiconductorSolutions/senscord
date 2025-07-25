@@ -34,43 +34,44 @@ class MemoryAllocatorHeap : public MemoryAllocatorCore {
 
 #ifdef SENSCORD_SERVER
   /**
-   * @brief Serialize the raw data memory area.
-   * @param[in] (rawdata_memory) Memory information for raw data.
+   * @brief Serialize from contained memory area.
+   * @param[in] (memory) Contained memory area information.
    * @param[out] (serialized) Serialized memory information.
    * @return Status object.
    */
-  virtual Status ServerSerialize(
-      const RawDataMemory& rawdata_memory,
-      std::vector<uint8_t>* serialized) const;
+  virtual Status Serialize(
+    const MemoryContained& memory,
+    std::vector<uint8_t>* serialized) const;
 
   /**
    * @brief Initialize the mapping area.
    * @return Status object.
    */
-  virtual Status ClientInitMapping();
+  virtual Status InitMapping();
 
   /**
    * @brief Deinitialize the mapping area.
    * @return Status object.
    */
-  virtual Status ClientExitMapping();
+  virtual Status ExitMapping();
 
   /**
    * @brief Mapping memory with serialized memory information.
-   * @param[in] (serialized) Serialized memory information.
-   * @param[out] (rawdata_memory) Memory information for raw data.
+   * @param[in] (serialized) Created from Serialize().
+   * @param[out] (memory) Memory informations.
+   *                      Must to be released with ReleaseMapping().
    * @return Status object.
    */
-  virtual Status ClientMapping(
-      const std::vector<uint8_t>& serialized,
-      RawDataMemory* rawdata_memory);
+  virtual Status Mapping(
+    const std::vector<uint8_t>& serialized,
+    MemoryContained* memory);
 
   /**
    * @brief Release the mapped area.
-   * @param[in] (rawdata_memory) Memory information for raw data.
+   * @param[in] (memory) Mapped memory.
    * @return Status object.
    */
-  virtual Status ClientUnmapping(const RawDataMemory& rawdata_memory);
+  virtual Status Unmapping(const MemoryContained& memory);
 #endif  // SENSCORD_SERVER
 
   /**

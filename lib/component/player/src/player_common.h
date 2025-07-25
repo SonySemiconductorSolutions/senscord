@@ -14,9 +14,6 @@
 #include "senscord/develop/recorder_common.h"
 #include "senscord/develop/common_types.h"
 
-// pre-definition
-class PlayerFrameFileManager;
-
 // Key is a property key and Value is an binary data of property
 typedef std::map<std::string, senscord::BinaryProperty> BinaryPropertyList;
 
@@ -25,9 +22,8 @@ typedef std::map<std::string, senscord::BinaryProperty> BinaryPropertyList;
  */
 struct PlayFrame {
   senscord::FrameInfo frame_info;
-  uint32_t index;   // index of total frame
+  uint32_t index;  // for PlayPositionProperty
   std::map<uint32_t, BinaryPropertyList> properties;
-  PlayerFrameFileManager* parent;
 };
 
 // The struct for info.xml

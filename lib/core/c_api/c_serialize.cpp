@@ -9,7 +9,6 @@
 #ifdef SENSCORD_SERIALIZE
 
 #include <inttypes.h>
-#include <limits>  // std::numeric_limits
 #include <vector>
 
 #include "senscord/c_api/senscord_c_api.h"
@@ -397,12 +396,10 @@ int32_t senscord_deserialize_object_detection_data(
     return -1;
   }
   senscord_object_detection_data_t* new_data =
-      new senscord_object_detection_data_t;
+                     new senscord_object_detection_data_t;
   new_data->data = NULL;
   new_data->count = static_cast<uint32_t>(tmp.data.size());
-  if (new_data->count > 0 &&
-    (new_data->count <= std::numeric_limits<size_t>::max() /
-    sizeof(senscord_detected_object_information_t))) {
+  if (new_data->count != 0) {
     new_data->data =
         new senscord_detected_object_information_t[new_data->count];
     for (uint32_t i = 0; i < new_data->count; ++i) {
@@ -462,12 +459,11 @@ int32_t senscord_deserialize_key_point_data(
     c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
     return -1;
   }
-  senscord_key_point_data_t* new_data = new senscord_key_point_data_t;
+  senscord_key_point_data_t* new_data =
+                     new senscord_key_point_data_t;
   new_data->data  = NULL;
   new_data->count = static_cast<uint32_t>(tmp.data.size());
-  if (new_data->count > 0 &&
-    (new_data->count <= std::numeric_limits<size_t>::max() /
-    sizeof(senscord_detected_key_point_information_t))) {
+  if (new_data->count != 0) {
     new_data->data =
         new senscord_detected_key_point_information_t[new_data->count];
     for (uint32_t i = 0; i < new_data->count; ++i) {
@@ -475,9 +471,7 @@ int32_t senscord_deserialize_key_point_data(
       new_data->data[i].key_points = NULL;
       new_data->data[i].count =
           static_cast<uint32_t>(tmp.data[i].key_points.size());
-      if (new_data->data[i].count > 0 &&
-        (new_data->data[i].count <= std::numeric_limits<size_t>::max() /
-        sizeof(senscord_key_point_t))) {
+      if (new_data->data[i].count != 0) {
         new_data->data[i].key_points =
             new senscord_key_point_t[new_data->data[i].count];
         for (uint32_t j = 0; j < new_data->data[i].count; ++j) {
@@ -547,12 +541,10 @@ int32_t senscord_deserialize_object_tracking_data(
     return -1;
   }
   senscord_object_tracking_data_t* new_data =
-      new senscord_object_tracking_data_t;
+                     new senscord_object_tracking_data_t;
   new_data->data = NULL;
   new_data->count = static_cast<uint32_t>(tmp.data.size());
-  if (new_data->count > 0 &&
-    (new_data->count <= std::numeric_limits<size_t>::max() /
-    sizeof(senscord_tracked_object_information_t))) {
+  if (new_data->count != 0) {
     new_data->data =
         new senscord_tracked_object_information_t[new_data->count];
     for (uint32_t i = 0; i < new_data->count; ++i) {

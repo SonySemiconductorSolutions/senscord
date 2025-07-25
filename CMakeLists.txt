@@ -51,7 +51,70 @@ set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "" FORCE)
 ################################################################################
 #  Common variables
 ################################################################################
-include(SensCordCommonPath)
+
+# Set the name of core
+set(SSDK_CORE_NAME senscord)
+
+# Set top directory variable
+set(SSDK_TOP_DIR ${PROJECT_SOURCE_DIR})
+
+# Module path
+set(SSDK_MODULE_DIR ${SSDK_TOP_DIR}/cmake)
+
+# set include directory path
+set(SSDK_INCLUDE_DIR ${SSDK_TOP_DIR}/include)
+
+# Setting the output destination directory
+set(SSDK_BUILD_OUTPUT_DIR ${CMAKE_BINARY_DIR}/output)
+
+# Output include directory.
+set(SSDK_BUILD_OUTPUT_INCLUDE_DIR ${SSDK_BUILD_OUTPUT_DIR}/include)
+
+# Destination directory.
+set(SSDK_BINARY_OUT_DIR ${SSDK_BUILD_OUTPUT_DIR}/bin)
+
+# Destination directory.
+set(SSDK_TEST_OUT_DIR ${SSDK_BUILD_OUTPUT_DIR}/bin)
+
+# Config destination directory.
+set(SSDK_CONFIG_OUT_DIR ${SSDK_BUILD_OUTPUT_DIR}/config)
+
+if (WIN32)
+  # Core destination directory.
+  set(SSDK_LIBRARY_OUT_DIR ${SSDK_BUILD_OUTPUT_DIR}/bin)
+else()
+  # Core destination directory.
+  set(SSDK_LIBRARY_OUT_DIR ${SSDK_BUILD_OUTPUT_DIR}/lib)
+endif()
+
+# Component destination directory.
+set(SSDK_COMPONENT_OUT_DIR ${SSDK_LIBRARY_OUT_DIR}/component)
+
+# Allocator estination directory.
+set(SSDK_ALLOCATOR_OUT_DIR ${SSDK_LIBRARY_OUT_DIR}/allocator)
+
+# Recorder destination directory.
+set(SSDK_RECORDER_OUT_DIR ${SSDK_LIBRARY_OUT_DIR}/recorder)
+
+# Connection destination directory.
+set(SSDK_CONNECTION_OUT_DIR ${SSDK_LIBRARY_OUT_DIR}/connection)
+
+# Converter destination directory.
+set(SSDK_CONVERTER_OUT_DIR ${SSDK_LIBRARY_OUT_DIR}/converter)
+
+# Component header reference.
+set(SSDK_COMPONENT_HEADER_DIR ${SSDK_BUILD_OUTPUT_DIR}/include)
+
+# Header destination directory.
+set(SSDK_HEADER_OUT_DIR ${SSDK_COMPONENT_HEADER_DIR}/${SSDK_CORE_NAME})
+
+# Python module output directory.
+set(SSDK_PYTHON_OUT_DIR ${SSDK_BUILD_OUTPUT_DIR}/python)
+
+# Utility destination directory
+set(SSDK_UTIL_BINARY_OUT_DIR ${SSDK_BINARY_OUT_DIR}/utility)
+set(SSDK_UTIL_LIBRARY_OUT_DIR ${SSDK_LIBRARY_OUT_DIR}/utility)
+set(SSDK_UTIL_TEST_OUT_DIR ${SSDK_TEST_OUT_DIR}/utility)
 
 ################################################################################
 # Environmental setting
@@ -268,6 +331,44 @@ if(WIN32 OR APPLE)
 endif()
 
 ################################################################################
+# Test
+
+option(SENSCORD_TEST_CORE   "Enables senscord test."    OFF)
+option(SENSCORD_TEST_OSAL   "Enables osal test."        OFF)
+
+if(DEFINED SENSCORD_TEST_CODE_ENABLE)  ### deprecated option
+  set(SENSCORD_TEST_CORE ${SENSCORD_TEST_CODE_ENABLE} CACHE BOOL "" FORCE)
+  unset(SENSCORD_TEST_CODE_ENABLE CACHE)
+endif()
+
+if(DEFINED OSAL_TEST_CODE_ENABLE)  ### deprecated option
+  set(SENSCORD_TEST_OSAL ${OSAL_TEST_CODE_ENABLE} CACHE BOOL "" FORCE)
+  unset(OSAL_TEST_CODE_ENABLE CACHE)
+endif()
+
+## Enable test function.
+if(SENSCORD_TEST_CORE OR SENSCORD_TEST_OSAL)
+  set(SENSCORD_TEST_LARGE_FILE OFF CACHE BOOL "")
+  mark_as_advanced(SENSCORD_TEST_LARGE_FILE)
+
+  enable_testing()
+
+  if(UNIX)
+    # Memory check test
+    #  [Command example]
+    #    cmake .. -DCMAKE_BUILD_TYPE=Debug -DSENSCORD_TEST_CORE=ON && make
+    #    ctest -T memcheck [options]
+    #    ctest -T memcheck -V -R <tests-regex>
+    #    ctest -T memcheck -E "performance|multi_process_and_thread|py_test"
+    set(MEMORYCHECK_COMMAND_OPTIONS "--fullpath-after= --error-limit=no --leak-check=full --show-leak-kinds=definite,possible --xml=yes --xml-file=${CMAKE_BINARY_DIR}/Testing/valgrind_result_%p.xml --num-callers=100 --show-below-main=yes --default-suppressions=no")
+    find_program(CTEST_MEMORYCHECK_COMMAND NAMES valgrind)
+    include(Dart)
+  endif()
+else()
+  unset(SENSCORD_TEST_LARGE_FILE CACHE)
+endif()
+
+################################################################################
 # Serialize
 
 option(SENSCORD_SERIALIZE "Enables the serialization function." ON)
@@ -312,6 +413,8 @@ endif()
 ## Synchronizer
 option(SENSCORD_SYNCHRONIZER "Enable build Synchronizer utility." OFF)
 option(SENSCORD_SYNCHRONIZER_SAMPLE "Enable build Synchronizer sample codes." OFF)
+set(SENSCORD_SYNCHRONIZER_TEST_MODE "Disable" CACHE STRING
+    "Specify Synchronizer test mode: Disable/Normal/Manual/Coverage/Valgrind")
 
 if(DEFINED SYNCHRONIZER_ENABLE)  ### deprecated option
   set(SENSCORD_SYNCHRONIZER ${SYNCHRONIZER_ENABLE} CACHE BOOL "" FORCE)
@@ -323,13 +426,19 @@ if(DEFINED SYNCHRONIZER_SAMPLE_ENABLE)  ### deprecated option
   unset(SYNCHRONIZER_SAMPLE_ENABLE CACHE)
 endif()
 
-if(SENSCORD_SYNCHRONIZER_SAMPLE)
+if(DEFINED SYNCHRONIZER_TEST_MODE)  ### deprecated option
+  set(SENSCORD_SYNCHRONIZER_TEST_MODE ${SYNCHRONIZER_TEST_MODE} CACHE STRING "" FORCE)
+  unset(SYNCHRONIZER_TEST_MODE CACHE)
+endif()
+
+if(SENSCORD_SYNCHRONIZER_SAMPLE OR NOT SENSCORD_SYNCHRONIZER_TEST_MODE STREQUAL "Disable")
   set(SENSCORD_SYNCHRONIZER ON)
 endif()
 
 if(ANDROID OR APPLE)
   unset(SENSCORD_SYNCHRONIZER CACHE)
   unset(SENSCORD_SYNCHRONIZER_SAMPLE CACHE)
+  unset(SENSCORD_SYNCHRONIZER_TEST_MODE CACHE)
 endif()
 
 ################################################################################
@@ -433,10 +542,15 @@ if(DEFINED SENSCORD_COMPONENT_AUDIO_PCM)
   message(STATUS "* SENSCORD_COMPONENT_AUDIO_PCM    -> ${SENSCORD_COMPONENT_AUDIO_PCM}")
 endif()
 
+message(STATUS "Test")
+message(STATUS "* SENSCORD_TEST_CORE              -> ${SENSCORD_TEST_CORE}")
+message(STATUS "* SENSCORD_TEST_OSAL              -> ${SENSCORD_TEST_OSAL}")
+
 if(DEFINED SENSCORD_SYNCHRONIZER)
-  message(STATUS "Utility")
+message(STATUS "Utility")
   message(STATUS "* SENSCORD_SYNCHRONIZER           -> ${SENSCORD_SYNCHRONIZER}")
   message(STATUS "* SENSCORD_SYNCHRONIZER_SAMPLE    -> ${SENSCORD_SYNCHRONIZER_SAMPLE}")
+  message(STATUS "* SENSCORD_SYNCHRONIZER_TEST_MODE -> ${SENSCORD_SYNCHRONIZER_TEST_MODE}")
 endif()
 
 message(STATUS "Others")
@@ -563,7 +677,55 @@ set(SSDK_EXPORT_CONFIG ${SSDK_CORE_NAME}-config.cmake)
 ################################################################################
 #  Custom targets
 ################################################################################
-include(SensCordCustomTarget)
+# Clean output directory.
+add_custom_target(clean_output
+                  COMMAND ${CMAKE_COMMAND}
+                          -E remove_directory ${SSDK_BUILD_OUTPUT_DIR})
+
+# Target to enabled all options.
+add_custom_target(option_all_enabled
+                  COMMAND ${CMAKE_COMMAND}
+                          -DCMAKELISTS_DIR="${SSDK_TOP_DIR}"
+                          -DOPTION_SWITCH=ON
+                          -P ${SSDK_MODULE_DIR}/SwitchAllOptions.cmake)
+
+# Target to diabled all options.
+add_custom_target(option_all_disabled
+                  COMMAND ${CMAKE_COMMAND}
+                          -DCMAKELISTS_DIR="${SSDK_TOP_DIR}"
+                          -DOPTION_SWITCH=OFF
+                          -P ${SSDK_MODULE_DIR}/SwitchAllOptions.cmake)
+
+# Target to enabled all tests.
+add_custom_target(test_all_enabled
+                  COMMAND ${CMAKE_COMMAND}
+                          -DCMAKELISTS_DIR="${SSDK_TOP_DIR}"
+                          -DOPTION_SWITCH=ON
+                          -P ${SSDK_MODULE_DIR}/SwitchAllTest.cmake)
+
+# Target to diabled all tests.
+add_custom_target(test_all_disabled
+                  COMMAND ${CMAKE_COMMAND}
+                          -DCMAKELISTS_DIR="${SSDK_TOP_DIR}"
+                          -DOPTION_SWITCH=OFF
+                          -P ${SSDK_MODULE_DIR}/SwitchAllTest.cmake)
+
+if(UNIX)
+  add_custom_target(clean_all
+                    COMMAND ${CMAKE_BUILD_TOOL} clean
+                    COMMAND ${CMAKE_BUILD_TOOL} clean_output)
+endif()
+
+if ("${CMAKE_BUILD_TYPE}" STREQUAL "Coverage")
+  add_custom_target(clean_gcov
+                    COMMAND rm -f `find -name \"*.gcno\"`
+                    COMMAND rm -f `find -name \"*.gcda\"`
+                    COMMAND rm -f `find -name \"*.gcov\"`)
+  add_dependencies(clean_all clean_gcov)
+endif()
+
+# Running cpplint
+add_custom_target(cpplint-all)
 
 ################################################################################
 #  Setting for IDE
@@ -625,6 +787,7 @@ include(SensCordUtils)
 
 # build warning level
 set(WARNING_LEVEL_CORE "warning_level_core")
+set(WARNING_LEVEL_TEST "warning_level_test")
 set_build_warning_level(${WARNING_LEVEL_CORE})
 
 if(APPLE)
@@ -645,7 +808,7 @@ install(EXPORT ${SSDK_EXPORT_NAME}
         DESTINATION ${SSDK_CMAKE_INSTALL_DIR})
 
 # Install license
-install(FILES COPYING.sony DESTINATION .)
+install(FILES LICENSE DESTINATION .)
 
 ################################################################################
 #  Build application
@@ -713,5 +876,20 @@ endif()
 ################################################################################
 #  Build utilities
 ################################################################################
+
+if((NOT SENSCORD_SYNCHRONIZER_TEST_MODE STREQUAL "Disable"))
+  # enable_testing() must be called in this directory.
+  enable_testing()
+
+  # # setup gcov
+  # set(DEBUG_OPTION_GCOV ON)
+  # enable_gocv_coverage()
+
+  if(SENSCORD_SYNCHRONIZER_TEST_MODE STREQUAL "Valgrind")
+    # Include Dart for ctest with valgrind.
+    include(Dart)
+  endif()
+endif()
+
 add_subdirectory(utility)
 

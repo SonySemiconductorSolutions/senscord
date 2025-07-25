@@ -11,25 +11,15 @@
 #include "senscord/senscord.h"
 
 // blockname for status
-static const char kBlockName[] = "pseudo_image";
+static const char kBlockName[] = "PseudoImage";
 
 // Default values
 static const uint32_t kDefaultFrameRateNum = 60;
 static const uint32_t kDefaultWidth = 200;
 static const uint32_t kDefaultHeight = 200;
-static const uint32_t kDefaultBufferNum = 8;
 
 // Channel Info
 static const uint32_t kChannelMax = 2;
-
-#define LOG_E(fmt, ...) \
-    SENSCORD_LOG_ERROR_TAGGED(kBlockName, fmt, ##__VA_ARGS__)
-#define LOG_W(fmt, ...) \
-    SENSCORD_LOG_WARNING_TAGGED(kBlockName, fmt, ##__VA_ARGS__)
-#define LOG_I(fmt, ...) \
-    SENSCORD_LOG_INFO_TAGGED(kBlockName, fmt, ##__VA_ARGS__)
-#define LOG_D(fmt, ...) \
-    SENSCORD_LOG_DEBUG_TAGGED(kBlockName, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Check to different from two properties.
@@ -62,39 +52,6 @@ static uint32_t RoundUp(uint32_t value, uint32_t step) {
 }
 
 /**
- * @brief Constructor
- * @param[in] (allocator) Memory allocator for this source.
- */
-PseudoImageSource::PseudoImageSource()
-    : util_(), allocator_(), frame_seq_num_(0) {
-  LOG_D("[pseudo] constructor");
-  senscord::osal::OSCreateMutex(&memory_queue_mutex_);
-
-  buffer_num_ = kDefaultBufferNum;
-  last_time_nsec_ = 0;
-
-  framerate_.num   = kDefaultFrameRateNum;
-  framerate_.denom = 1;
-  sleep_nsec_ = (1000000000ULL * framerate_.denom) / framerate_.num;
-
-  image_property_.width  = kDefaultWidth;
-  image_property_.height = kDefaultHeight;
-  image_property_.stride_bytes = RoundUp(image_property_.width, 16);
-  image_property_.pixel_format = senscord::kPixelFormatGREY;
-
-  pseudo_image_.x = 100;
-  pseudo_image_.y = 200;
-  pseudo_image_.z = "hoge";
-}
-
-/**
- * @brief Destructor
- */
-PseudoImageSource::~PseudoImageSource() {
-  senscord::osal::OSDestroyMutex(memory_queue_mutex_);
-}
-
-/**
  * @brief Open the stream source.
  * @param[in] (core) The core instance.
  * @param[in] (util) The utility accessor to core.
@@ -103,7 +60,7 @@ PseudoImageSource::~PseudoImageSource() {
 senscord::Status PseudoImageSource::Open(
     senscord::Core* core,
     senscord::StreamSourceUtility* util) {
-  LOG_D("[pseudo] open");
+  SENSCORD_LOG_DEBUG("[pseudo] open");
   util_ = util;
 
   // get allocator (use default)
@@ -126,13 +83,13 @@ senscord::Status PseudoImageSource::Open(
       image_property_.width = static_cast<uint32_t>(value);
       image_property_.stride_bytes = RoundUp(static_cast<uint32_t>(value), 16);
     }
-    LOG_I("[pseudo] width = %" PRIu32, image_property_.width);
+    SENSCORD_LOG_INFO("[pseudo] width = %" PRIu32, image_property_.width);
 
     status = util_->GetStreamArgument("height", &value);
     if (status.ok()) {
       image_property_.height = static_cast<uint32_t>(value);
     }
-    LOG_I("[pseudo] height = %" PRIu32, image_property_.height);
+    SENSCORD_LOG_INFO("[pseudo] height = %" PRIu32, image_property_.height);
   }
 
   // framerate
@@ -145,18 +102,8 @@ senscord::Status PseudoImageSource::Open(
       framerate.denom = 1;
       Set(senscord::kFrameRatePropertyKey, &framerate);
     }
-    LOG_I("[pseudo] framerate = %" PRIu32 " / %" PRIu32,
-          framerate_.num, framerate_.denom);
-  }
-
-  // buffer_num
-  {
-    uint64_t buffer_num = 0;
-    status = util_->GetStreamArgument("buffer_num", &buffer_num);
-    if (status.ok()) {
-      buffer_num_ = static_cast<uint32_t>(buffer_num);
-    }
-    LOG_I("[pseudo] buffer_num = %" PRIu32, buffer_num_);
+    SENSCORD_LOG_INFO("[pseudo] framerate = %" PRIu32 " / %" PRIu32,
+        framerate_.num, framerate_.denom);
   }
 
   // set channel property
@@ -173,111 +120,7 @@ senscord::Status PseudoImageSource::Open(
  * @return The status of function.
  */
 senscord::Status PseudoImageSource::Close() {
-  LOG_D("[pseudo] close");
-  ClearMemory();
-  return senscord::Status::OK();
-}
-
-/**
- * @brief Clear all memory.
- */
-void PseudoImageSource::ClearMemory() {
-  for (std::vector<senscord::Memory*>::const_iterator
-      itr = memory_list_.begin(), end = memory_list_.end();
-      itr != end; ++itr) {
-    allocator_->Free(*itr);
-    LOG_D("Free: %p", *itr);
-  }
-  memory_list_.clear();
-  senscord::osal::OSLockMutex(memory_queue_mutex_);
-  memory_queue_.clear();
-  senscord::osal::OSUnlockMutex(memory_queue_mutex_);
-}
-
-/**
- * @brief Create memory.
- * @return The status of function.
- */
-senscord::Status PseudoImageSource::CreateMemory() {
-  if (buffer_num_ > 0) {
-    size_t frame_size = image_property_.height * image_property_.stride_bytes;
-    for (uint32_t index = 0; index < buffer_num_; ++index) {
-      senscord::Memory* memory = NULL;
-      senscord::Status status = allocator_->Allocate(frame_size, &memory);
-      if (!status.ok()) {
-        return SENSCORD_STATUS_TRACE(status);
-      }
-      memory_list_.push_back(memory);
-      senscord::osal::OSLockMutex(memory_queue_mutex_);
-      memory_queue_.push_back(memory);
-      senscord::osal::OSUnlockMutex(memory_queue_mutex_);
-      LOG_D("Allocate: %p, %" PRIuS, memory, frame_size);
-    }
-  }
-  return senscord::Status::OK();
-}
-
-/**
- * @brief Get memory.
- * @return The memory.
- */
-senscord::Memory* PseudoImageSource::GetMemory() {
-  senscord::Memory* memory = NULL;
-  if (buffer_num_ > 0) {
-    senscord::osal::OSLockMutex(memory_queue_mutex_);
-    if (!memory_queue_.empty()) {
-      memory = memory_queue_.front();
-      memory_queue_.pop_front();
-    }
-    senscord::osal::OSUnlockMutex(memory_queue_mutex_);
-  } else {
-    size_t frame_size = image_property_.height * image_property_.stride_bytes;
-    allocator_->Allocate(frame_size, &memory);
-    LOG_D("Allocate: %p, %" PRIuS, memory, frame_size);
-  }
-  return memory;
-}
-
-/**
- * @brief Release memory.
- * @param[in] (memory) The memory to release.
- */
-void PseudoImageSource::ReleaseMemory(senscord::Memory* memory) {
-  if (buffer_num_ > 0) {
-    senscord::osal::OSLockMutex(memory_queue_mutex_);
-    memory_queue_.push_back(memory);
-    senscord::osal::OSUnlockMutex(memory_queue_mutex_);
-  } else {
-    allocator_->Free(memory);
-    LOG_D("Free: %p", memory);
-  }
-}
-
-/**
- * @brief Start the stream source.
- * @return The status of function.
- */
-senscord::Status PseudoImageSource::Start() {
-  senscord::Status status;
-  ClearMemory();
-  status = CreateMemory();
-  if (!status.ok()) {
-    return SENSCORD_STATUS_TRACE(status);
-  }
-
-  sleep_nsec_ = (1000000000ULL * framerate_.denom) / framerate_.num;
-  SENSCORD_LOG_INFO("[pseudo] sleep_nsec_ = %" PRIu64, sleep_nsec_);
-  senscord::osal::OSGetTime(&last_time_nsec_);
-
-  return senscord::Status::OK();
-}
-
-/**
- * @brief Stop the stream source.
- * @return The status of function.
- */
-senscord::Status PseudoImageSource::Stop() {
-  last_time_nsec_ = 0;
+  SENSCORD_LOG_DEBUG("[pseudo] close");
   return senscord::Status::OK();
 }
 
@@ -286,42 +129,48 @@ senscord::Status PseudoImageSource::Stop() {
  * @param[out] (frames) The information about new frames.
  */
 void PseudoImageSource::GetFrames(std::vector<senscord::FrameInfo>* frames) {
-  uint64_t current_time = 0;
-  senscord::osal::OSGetTime(&current_time);
+  // wait to finish to create the new raw data.
+  senscord::osal::OSSleep(sleep_nsec_);
 
-  uint64_t seq_num = frame_seq_num_;
-  frame_seq_num_ += 1;
-  last_time_nsec_ += sleep_nsec_;
-  if (last_time_nsec_ > current_time) {
-    uint64_t wait_time = last_time_nsec_ - current_time;
-    senscord::osal::OSSleep(wait_time);
-  }
+  // create information.
+  std::string rawdata_type = senscord::kRawDataTypeImage;
+  size_t raw_size = image_property_.height * image_property_.stride_bytes;
+  uint64_t timestamp = 0;
+  senscord::osal::OSGetTime(&timestamp);
 
+    // setup frame.
   senscord::FrameInfo frameinfo = {};
-  frameinfo.sequence_number = seq_num;
+  frameinfo.sequence_number = frame_seq_num_++;
 
   for (uint32_t index = 0; index < kChannelMax; ++index) {
-    senscord::Memory* memory = GetMemory();
-    if (memory == NULL) {
-      // No Buffer available
-      LOG_W("[pseudo] drop (seq=%" PRIu64 "): no buffer left", seq_num);
-      util_->SendEventFrameDropped(seq_num);
-      ReleaseFrame(frameinfo, NULL);
-      return;
+    senscord::Memory* raw_memory = NULL;
+    if (raw_size > 0) {
+      // allocate the new memory.
+      senscord::Status status = allocator_->Allocate(raw_size, &raw_memory);
+      if (!status.ok()) {
+        SENSCORD_LOG_WARNING("allocation failed!: seq_num=%" PRIu64,
+            frameinfo.sequence_number);
+        util_->SendEventFrameDropped(frameinfo.sequence_number);
+        ReleaseFrame(frameinfo, NULL);
+        return;
+      }
+
+      // copy the rawdata to allocated memory.
+      senscord::osal::OSMemset(
+          reinterpret_cast<uint8_t*>(raw_memory->GetAddress()),
+          static_cast<uint8_t>(frameinfo.sequence_number & 0xFF),
+          raw_size);
     }
 
-    senscord::osal::OSMemset(
-        reinterpret_cast<uint8_t*>(memory->GetAddress()),
-        static_cast<uint8_t>(seq_num & 0xFF),
-        memory->GetSize());
-
+    // initialize channel informations.
     senscord::ChannelRawData channel = {};
     channel.channel_id = senscord::kChannelIdImage(index);
-    channel.data_type = senscord::kRawDataTypeImage;
-    channel.data_memory = memory;
-    channel.data_size = memory->GetSize();
+    channel.data_type = rawdata_type;
+    channel.data_memory = raw_memory;
+    channel.data_size = raw_size;
     channel.data_offset = 0;
-    channel.captured_timestamp = last_time_nsec_;
+    channel.captured_timestamp = timestamp;
+
     frameinfo.channels.push_back(channel);
   }
 
@@ -338,11 +187,13 @@ void PseudoImageSource::GetFrames(std::vector<senscord::FrameInfo>* frames) {
 senscord::Status PseudoImageSource::ReleaseFrame(
     const senscord::FrameInfo& frameinfo,
     const std::vector<uint32_t>* referenced_channel_ids) {
-  for (std::vector<senscord::ChannelRawData>::const_iterator
-      itr = frameinfo.channels.begin(), end = frameinfo.channels.end();
-      itr != end; ++itr) {
+  // free raw data
+  typedef std::vector<senscord::ChannelRawData> ChannelRawList;
+  ChannelRawList::const_iterator itr = frameinfo.channels.begin();
+  ChannelRawList::const_iterator end = frameinfo.channels.end();
+  for (; itr != end; ++itr) {
     if (itr->data_memory != NULL) {
-      ReleaseMemory(itr->data_memory);
+      allocator_->Free(itr->data_memory);
     }
   }
   return senscord::Status::OK();
@@ -411,8 +262,8 @@ senscord::Status PseudoImageSource::Set(
     framerate_ = *property;
     sleep_nsec_ = new_sleep_nsec;
 
-    LOG_I("change framerate to %" PRId32 " / %" PRId32,
-          property->num, property->denom);
+    SENSCORD_LOG_INFO("change framerate to %" PRId32 " / %" PRId32,
+        property->num, property->denom);
 
     // notify to streams
     util_->SendEventPropertyUpdated(key);
@@ -453,10 +304,6 @@ senscord::Status PseudoImageSource::Set(
     return SENSCORD_STATUS_FAIL(kBlockName,
         senscord::Status::kCauseInvalidArgument,
         "Changing pixel format is not supported");
-  }
-  if (last_time_nsec_ > 0) {
-    return SENSCORD_STATUS_FAIL(kBlockName,
-        senscord::Status::kCauseInvalidOperation, "already started");
   }
 
   if (IsDifferent(image_property_, *property)) {
@@ -539,4 +386,35 @@ senscord::Status PseudoImageSource::Set(
     util_->SendEventPropertyUpdated(key);
   }
   return senscord::Status::OK();
+}
+
+/**
+ * @brief Constructor
+ * @param[in] (allocator) Memory allocator for this source.
+ */
+PseudoImageSource::PseudoImageSource()
+    : util_(), allocator_(), frame_seq_num_(0) {
+  SENSCORD_LOG_DEBUG("[pseudo] constructor");
+
+  // setup properties to default value.
+  framerate_.num   = kDefaultFrameRateNum;
+  framerate_.denom = 1;
+  sleep_nsec_ = (1000ULL * 1000 * 1000) / kDefaultFrameRateNum;
+
+  image_property_.width  = kDefaultWidth;
+  image_property_.height = kDefaultHeight;
+  image_property_.stride_bytes = RoundUp(image_property_.width, 16);
+  image_property_.pixel_format = senscord::kPixelFormatGREY;
+
+  pseudo_image_.x = 100;
+  pseudo_image_.y = 200;
+  pseudo_image_.z = "hoge";
+}
+
+/**
+ * @brief Destructor
+ */
+PseudoImageSource::~PseudoImageSource() {
+  util_ = NULL;
+  allocator_ = NULL;
 }

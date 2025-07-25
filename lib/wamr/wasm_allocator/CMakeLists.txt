@@ -14,7 +14,7 @@ project(${PROJECT_NAME} VERSION ${SensCord_VERSION})
 set(TARGET_NAME ${PROJECT_NAME})
 
 set(TARGET_SOURCES
-    src/wasm_memory_allocator_adapter.cpp
+    src/wasm_memory_allocator.cpp
 )
 
 if(WIN32)
@@ -35,10 +35,7 @@ if(WIN32)
   set_target_properties(${TARGET_NAME} PROPERTIES FOLDER "allocator")
 endif()
 
-target_link_libraries(${TARGET_NAME} senscord senscord_wamr)
-
-target_include_directories(${TARGET_NAME} PRIVATE
-    ${PROJECT_SOURCE_DIR}/..)
+target_link_libraries(${TARGET_NAME} senscord libiwasm)
 
 target_compile_options(${TARGET_NAME} PRIVATE ${SSDK_COMPILE_OPTIONS})
 

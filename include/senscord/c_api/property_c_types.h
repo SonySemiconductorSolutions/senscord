@@ -9,10 +9,8 @@
 #include <stdint.h>
 
 #include "senscord/config.h"
+
 #include "senscord/c_api/property_c_types_audio.h"
-#ifdef __wasm__
-#include "senscord/c_api/property_wasm_types.h"
-#endif  /* __wasm__ */
 
 /** Length of the version string. */
 #define SENSCORD_VERSION_LENGTH         (256)
@@ -407,21 +405,6 @@ struct senscord_recorder_list_property_t {
 struct senscord_play_mode_property_t {
   /** Enabling the repeat play. (0:disable, 1:enable) */
   uint8_t repeat;
-};
-
-/**
- * PlayPauseProperty
- * @see senscord::kPlayPausePropertyKey
- */
-#define SENSCORD_PLAY_PAUSE_PROPERTY_KEY "play_pause_property"
-
-/**
- * @brief Property for the playback pause mode of the stream.
- * @see senscord::PlayPauseProperty
- */
-struct senscord_play_pause_property_t {
-  /** Enabling the pause mode. (0:disable, 1:enable) */
-  uint8_t pause;
 };
 
 /**

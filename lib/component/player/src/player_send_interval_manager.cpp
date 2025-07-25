@@ -50,11 +50,9 @@ PlayerSendIntervalManager::PlayerSendIntervalManager()
       mutex_thread_started_(NULL),
       is_repeat_(false),
       sleep_time_(0),
-      async_start_position_(0),
-      is_change_posisiton_() {
+      async_start_position_(0) {
   senscord::osal::OSCreateMutex(&mutex_port_manage_);
   senscord::osal::OSCreateMutex(&mutex_thread_started_);
-  senscord::osal::OSCreateMutex(&mutex_start_position_);
 }
 
 /**
@@ -65,8 +63,6 @@ PlayerSendIntervalManager::~PlayerSendIntervalManager() {
   mutex_port_manage_ = NULL;
   senscord::osal::OSDestroyMutex(mutex_thread_started_);
   mutex_thread_started_ = NULL;
-  senscord::osal::OSDestroyMutex(mutex_start_position_);
-  mutex_start_position_ = NULL;
 }
 
 /**
@@ -153,9 +149,8 @@ void PlayerSendIntervalManager::SetFrameRate(
  */
 void PlayerSendIntervalManager::SetAsyncPlayStartPosition(
     const size_t position) {
-  player::AutoLock autolock(mutex_start_position_);
+  player::AutoLock autolock(mutex_port_manage_);
   async_start_position_ = position;
-  is_change_posisiton_ = true;
 }
 
 /**
@@ -314,7 +309,7 @@ senscord::Status PlayerSendIntervalManager::WaitInterval(int32_t port_id) {
         info.cond_send_wait, info.mutex_send_wait, kWaitIntervalTimeout);
   }
 
-  if (ret < 0 || info.sent_count == 0) {
+  if (ret < 0) {
     return SENSCORD_STATUS_FAIL(kModuleName, senscord::Status::kCauseAborted,
         "failed to wait interval: ret=%" PRIx32, ret);
   }
@@ -370,9 +365,6 @@ void PlayerSendIntervalManager::SignalProcessing() {
     port_id = itr->first;
     // set frame count
     frame_count = itr->second.sent_time_list.size();
-  }
-  {
-    player::AutoLock autolock(mutex_start_position_);
     // set current position
     current_position = async_start_position_;
   }
@@ -383,37 +375,25 @@ void PlayerSendIntervalManager::SignalProcessing() {
 
   while (IsThreadStarted()) {
     uint64_t sleep_time = GetSleepTime();
-    {
-      player::AutoLock autolock(mutex_start_position_);
-      if (is_change_posisiton_) {
-        current_position = async_start_position_;
-        is_change_posisiton_ = false;
-      }
+    if (IsFrameQueueEmpty()) {
+      senscord::osal::OSSleep(sleep_time);
+      continue;
     }
-    if (!IsPaused(port_id)) {
-      if (IsFrameQueueEmpty()) {
+
+    if (current_position >= frame_count) {
+      if (is_repeat_) {
+        current_position = 0;
+      } else {
         senscord::osal::OSSleep(sleep_time);
         continue;
       }
-
-      if (current_position >= frame_count) {
-        if (is_repeat_) {
-          current_position = 0;
-        } else {
-          senscord::osal::OSSleep(sleep_time);
-          continue;
-        }
-      }
-
-      // Cond signal to send thread.
-      SignalCond(port_id, true);
-
-      // Seek play position
-      ++current_position;
-    } else {
-      // Cond signal to send thread.
-      SignalCond(port_id, true);
     }
+
+    // Cond signal to send thread.
+    SignalCond(port_id, true);
+
+    // Seek play position
+    ++current_position;
 
     uint64_t correction =
         GetCorrectionTime(sleep_time, &prev_timestamp, &prev_correction);
@@ -669,19 +649,4 @@ uint64_t PlayerSendIntervalManager::GetCorrectionTime(
   *prev_correction = correction_time;
 
   return correction_time;
-}
-
-/**
- * @brief Get pause state of playback.
- * @param[in] (port_id) The id of port
- * @return true: paused, false: not paused
- */
-bool PlayerSendIntervalManager::IsPaused(int32_t port_id) {
-  player::AutoLock autolock(mutex_port_manage_);
-  PortManageList::iterator found = send_manage_list_.find(port_id);
-  if (found == send_manage_list_.end()) {
-    // Unmanaged port id (Streams that are not open)
-    return false;
-  }
-  return found->second.port_instance->IsPlayPaused();
 }

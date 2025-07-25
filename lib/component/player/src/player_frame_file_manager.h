@@ -60,14 +60,6 @@ class PlayerFrameFileManager {
   senscord::Status GetFrame(PlayFrame** frame);
 
   /**
-   * @brief Get the frame by position
-   * @param[out] (frame) frame data
-   * @param[in] (position) The position of frame
-   * @return status object
-   */
-  senscord::Status GetFrame(PlayFrame** frame, size_t position);
-
-  /**
    * @brief Clear raw index.
    */
   void ClearRawIndex();
@@ -151,18 +143,6 @@ class PlayerFrameFileManager {
    */
   void SetPlayStartPosition(const uint32_t position);
 
-  /**
-   * @brief Set the playback pause state.
-   * @param[in] (paused) Playback pause state to set.
-   */
-  void SetPause(bool paused);
-
-  /**
-   * @brief Get pause state of playback.
-   * @return true: paused, false: not paused
-   */
-  bool IsPaused() const;
-
  private:
   /**
    * @brief Raw data storage of one channel for raw_index.dat file.
@@ -178,19 +158,17 @@ class PlayerFrameFileManager {
   };
 
   std::string target_path_;
-  uint32_t start_offset_;
   uint64_t read_sleep_time_;
   senscord::MemoryAllocator* allocator_;
   senscord::osal::OSThread* read_thread_;
   bool is_started_;
-  senscord::osal::OSMutex* mutex_state_;
+  mutable senscord::osal::OSMutex* mutex_started_;
 
   // frames
   typedef std::vector<std::pair<uint64_t, PlayFrame*> > PlayFrameQueue;
-  senscord::osal::OSMutex* mutex_frame_queue_;
+  mutable senscord::osal::OSMutex* mutex_frame_queue_;
   PlayFrameQueue frame_queue_;
   senscord::osal::OSCond* cond_frame_buffering_;
-  senscord::osal::OSCond* cond_wait_reading_;
 
   typedef std::vector<RawIndexDataWithOffset> RawIndexList;
   RawIndexList raw_index_;
@@ -203,10 +181,6 @@ class PlayerFrameFileManager {
 
   // start seek position
   uint32_t start_position_;
-  bool is_change_posisiton_;
-
-  // pause
-  bool is_pause_;
 
   /**
    * @brief Read raw index from record file.
@@ -293,11 +267,6 @@ class PlayerFrameFileManager {
       const RawIndexDataWithOffset* raw_index,
       senscord::Memory** memory,
       senscord::osal::OSFile* fp);
-
-  /**
-   * @brief Clear the frame queue.
-   */
-  void ClearFrameQueue();
 
   /**
    * @brief Check the state of the thread

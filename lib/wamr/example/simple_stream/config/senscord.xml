@@ -12,16 +12,12 @@
 
   <instances>
     <instance name="pseudo_image_instance" component="component_pseudo_image">
-      <allocators>
-        <allocator key="wasm"/>
-      </allocators>
     </instance>
   </instances>
 
   <core>
     <log level="info" tag="core"/>
     <log level="info" tag="defaults"/>
-    <log level="debug" tag="wasm"/>
 
     <converters>
       <converter name="senscord_core_converter" type="property|rawdata"/>

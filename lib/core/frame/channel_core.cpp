@@ -203,11 +203,11 @@ Status ChannelCore::GetProperty(
 #endif  // SENSCORD_SERIALIZE
 
 /**
- * @brief Get the raw data with memory informations.
- * @param[out] (memory) Memory information for raw data.
+ * @brief Get the raw data with memory use informations.
+ * @param[out] (memory) Raw data with memory use.
  * @return Status object.
  */
-Status ChannelCore::GetRawDataMemory(RawDataMemory* memory) const {
+Status ChannelCore::GetRawDataMemory(MemoryContained* memory) const {
   SENSCORD_STATUS_ARGUMENT_CHECK(memory == NULL);
   memory->memory = channel_raw_data_.data_memory;
   memory->size = channel_raw_data_.data_size;

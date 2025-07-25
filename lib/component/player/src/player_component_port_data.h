@@ -11,7 +11,6 @@
 #include <map>
 #include <string>
 #include <vector>
-#include <set>
 
 #include "./player_common.h"
 #include "./player_component.h"
@@ -148,24 +147,12 @@ class PlayerComponentPortData : private senscord::util::Noncopyable {
    */
   void SetPlayStartPosition(uint32_t position);
 
-  /**
-   * @brief Set the playback pause state.
-   * @param[in] (pause) Playback pause state to set
-   */
-  void SetPlayPause(bool pause);
-
-  /**
-   * @brief Get pause state of playback.
-   * @return true: paused, false: not paused
-   */
-  bool IsPlayPaused() const;
-
  private:
   PlayerComponent* player_component_;
   senscord::MemoryAllocator* allocator_;
   senscord::osal::OSThread* send_thread_;
   bool is_started_;
-  senscord::osal::OSMutex* mutex_started_;
+  mutable senscord::osal::OSMutex* mutex_started_;
 
   int32_t port_id_;
   senscord::osal::OSMutex* mutex_state_;
@@ -184,10 +171,6 @@ class PlayerComponentPortData : private senscord::util::Noncopyable {
   uint32_t latest_position_;
 
   size_t composite_buffer_size_;
-
-  senscord::osal::OSMutex* mutex_frames_;
-  typedef std::set<uint64_t> SentSeqNumList;
-  std::map<PlayFrame*, SentSeqNumList> sent_frames_;
 
   /**
    * @brief Set thread started flag.
@@ -282,19 +265,6 @@ class PlayerComponentPortData : private senscord::util::Noncopyable {
    * @return true: specified, false: not specified
    */
   bool IsSpecifiedTargetPath() const;
-
-  /**
-   * @brief Get frame.
-   * @param[out] (frame) frame data.
-   * @return Status object.
-   */
-  senscord::Status GetFrame(PlayFrame** frame);
-
-  /**
-   * @brief Release the frame memory.
-   * @param[in] (frameinfo) Infomation to release frame.
-   */
-  void ReleaseFrame(const senscord::FrameInfo& frameinfo);
 };
 
 #endif  // LIB_COMPONENT_PLAYER_SRC_PLAYER_COMPONENT_PORT_DATA_H_

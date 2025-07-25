@@ -356,7 +356,7 @@ Status TcpConnection::GetChannelRawData(
         Status::kCauseInvalidArgument, "rawdata is null");
   }
 
-  RawDataMemory rawdata_memory = {};
+  MemoryContained rawdata_memory = {};
   Status status = channel->GetRawDataMemory(&rawdata_memory);
   if (!status.ok()) {
     return SENSCORD_STATUS_TRACE(status);

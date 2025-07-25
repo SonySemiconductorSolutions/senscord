@@ -95,11 +95,11 @@ class ChannelCore : public Channel {
 #endif  // SENSCORD_SERIALIZE
 
   /**
-   * @brief Get the raw data with memory informations.
-   * @param[out] (memory) Memory information for raw data.
+   * @brief Get the raw data with memory use informations.
+   * @param[out] (memory) Raw data with memory use.
    * @return Status object.
    */
-  virtual Status GetRawDataMemory(RawDataMemory* memory) const;
+  virtual Status GetRawDataMemory(MemoryContained* memory) const;
 
   /**
    * @brief  Get the channel ID.

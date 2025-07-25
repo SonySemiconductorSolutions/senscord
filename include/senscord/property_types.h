@@ -540,20 +540,6 @@ struct PlayPositionProperty {
 };
 
 /**
- * PlayPauseProperty
- */
-const char kPlayPausePropertyKey[] = "play_pause_property";
-
-/**
- * @brief Property that indicates the playback position in the player function.
- */
-struct PlayPauseProperty {
-  bool pause;
-
-  SENSCORD_SERIALIZE_DEFINE(pause)
-};
-
-/**
  * @brief Property for set/get binary data.
  */
 struct BinaryProperty {

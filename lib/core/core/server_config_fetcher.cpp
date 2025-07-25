@@ -122,7 +122,7 @@ void ServerConfigFetcher::ConnectionThreadCore() {
     connection_->Exit();
     connection_manager->ReleaseConnection(connection_);
     connection_ = NULL;
-    SENSCORD_LOG_ERROR("%s", status.ToString().c_str());
+    SENSCORD_LOG_ERROR(status.ToString().c_str());
     return;
   }
   is_connected_ = true;
@@ -135,7 +135,7 @@ void ServerConfigFetcher::ConnectionThreadCore() {
     connection_->Exit();
     connection_manager->ReleaseConnection(connection_);
     connection_ = NULL;
-    SENSCORD_LOG_ERROR("%s", status.ToString().c_str());
+    SENSCORD_LOG_ERROR(status.ToString().c_str());
     return;
   }
   // receiving
@@ -143,7 +143,7 @@ void ServerConfigFetcher::ConnectionThreadCore() {
   // disconnect
   status = connection_->Close();
   if (!status.ok()) {
-    SENSCORD_LOG_WARNING("%s", status.ToString().c_str());
+    SENSCORD_LOG_WARNING(status.ToString().c_str());
   }
   is_connected_ = false;
   connection_->Exit();
@@ -178,7 +178,7 @@ void ServerConfigFetcher::ReceivingProcess() {
         break;
       } else {
         // unexpected case
-        SENSCORD_LOG_WARNING("%s", status.ToString().c_str());
+        SENSCORD_LOG_WARNING(status.ToString().c_str());
         ReleaseCommandReply(&msg);
       }
     } else {

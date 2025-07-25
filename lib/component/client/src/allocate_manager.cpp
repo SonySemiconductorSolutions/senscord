@@ -118,7 +118,7 @@ senscord::Status AllocateManager::Close(int32_t port_id) {
  */
 senscord::Status AllocateManager::Mapping(
     int32_t port_id, const std::string& allocator_key,
-    const std::vector<uint8_t>& serialized, senscord::RawDataMemory* memory) {
+    const std::vector<uint8_t>& serialized, senscord::MemoryContained* memory) {
   PortAllocator* port_allocator = NULL;
   senscord::Status status = GetPortAllocator(port_id, &port_allocator);
   SENSCORD_STATUS_TRACE(status);
@@ -139,7 +139,7 @@ senscord::Status AllocateManager::Mapping(
  * @return Status object.
  */
 senscord::Status AllocateManager::Unmapping(
-    int32_t port_id, const senscord::RawDataMemory& memory) {
+    int32_t port_id, const senscord::MemoryContained& memory) {
   PortAllocator* port_allocator = NULL;
   senscord::Status status = GetPortAllocator(port_id, &port_allocator);
   SENSCORD_STATUS_TRACE(status);

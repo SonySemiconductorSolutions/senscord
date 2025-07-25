@@ -442,7 +442,7 @@ Status StreamAdapter::GetMessageDataForSendFrame(
     dest_ch.channel_id = itr->first;
 
     // rawdata memory
-    RawDataMemory rawdata_memory = {};
+    MemoryContained rawdata_memory = {};
     ch->GetRawDataMemory(&rawdata_memory);
     if (rawdata_memory.memory != NULL) {
       MemoryAllocator* allocator = rawdata_memory.memory->GetAllocator();
@@ -666,7 +666,7 @@ void StreamAdapter::DoMessage(const Message& msg) {
   }
 
   if (!status.ok()) {
-    SENSCORD_SERVER_LOG_WARNING("%s", status.ToString().c_str());
+    SENSCORD_SERVER_LOG_WARNING(status.ToString().c_str());
   }
 }
 

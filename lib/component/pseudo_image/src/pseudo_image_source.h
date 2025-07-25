@@ -8,7 +8,6 @@
 
 #include <string>
 #include <vector>
-#include <list>
 #include "senscord/logger.h"
 #include "senscord/osal.h"
 #include "senscord/develop/stream_source.h"
@@ -19,16 +18,6 @@
  */
 class PseudoImageSource : public senscord::ImageStreamSource {
  public:
-  /**
-   * @brief Constructor
-   */
-  PseudoImageSource();
-
-  /**
-   * @brief Destructor
-   */
-  ~PseudoImageSource();
-
   /**
    * @brief Open the stream source.
    * @param[in] (core) The core instance.
@@ -44,18 +33,6 @@ class PseudoImageSource : public senscord::ImageStreamSource {
    * @return The status of function.
    */
   virtual senscord::Status Close();
-
-  /**
-   * @brief Start the stream source.
-   * @return The status of function.
-   */
-  virtual senscord::Status Start();
-
-  /**
-   * @brief Stop the stream source.
-   * @return The status of function.
-   */
-  virtual senscord::Status Stop();
 
   /**
    * @brief Pull up the new frames.
@@ -151,43 +128,21 @@ class PseudoImageSource : public senscord::ImageStreamSource {
   senscord::Status Set(
     const std::string& key, const PseudoImageProperty* property);
 
- private:
   /**
-   * @brief Clear all memory.
+   * @brief Constructor
    */
-  void ClearMemory();
+  PseudoImageSource();
 
   /**
-   * @brief Create memory.
-   * @return The status of function.
+   * @brief Destructor
    */
-  senscord::Status CreateMemory();
-
-  /**
-   * @brief Get memory.
-   * @return The memory.
-   */
-  senscord::Memory* GetMemory();
-
-  /**
-   * @brief Release memory.
-   * @param[in] (memory) The memory to release.
-   */
-  void ReleaseMemory(senscord::Memory* memory);
+  ~PseudoImageSource();
 
  private:
   senscord::StreamSourceUtility* util_;
   senscord::MemoryAllocator* allocator_;
-
-  // Memory list
-  std::vector<senscord::Memory*> memory_list_;
-  std::list<senscord::Memory*> memory_queue_;
-  senscord::osal::OSMutex* memory_queue_mutex_;
-
   uint64_t frame_seq_num_;
-  uint64_t last_time_nsec_;
   uint64_t sleep_nsec_;
-  uint32_t buffer_num_;
 
   // properties
   senscord::FrameRateProperty framerate_;

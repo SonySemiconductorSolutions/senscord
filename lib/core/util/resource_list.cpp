@@ -31,7 +31,14 @@ ResourceList::ResourceList() : pimpl_(new Impl()) {
  * Releases the registered resource data.
  */
 ResourceList::~ResourceList() {
-  ReleaseAll();
+  {
+    util::AutoLock _lock(&pimpl_->mutex);
+    for (std::map<std::string, ResourceData*>::const_iterator
+        itr = pimpl_->list.begin(), end = pimpl_->list.end();
+        itr != end; ++itr) {
+      delete itr->second;
+    }
+  }
   delete pimpl_;
 }
 
@@ -84,19 +91,6 @@ Status ResourceList::Release(const std::string& key) {
   delete itr->second;
   pimpl_->list.erase(itr);
   return Status::OK();
-}
-
-/**
- * @brief Releases all resource data.
- */
-void ResourceList::ReleaseAll() {
-  util::AutoLock _lock(&pimpl_->mutex);
-  for (std::map<std::string, ResourceData*>::const_iterator
-      itr = pimpl_->list.begin(), end = pimpl_->list.end();
-      itr != end; ++itr) {
-    delete itr->second;
-  }
-  pimpl_->list.clear();
 }
 
 }  // namespace senscord

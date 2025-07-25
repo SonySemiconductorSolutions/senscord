@@ -279,9 +279,9 @@ class PlayerComponent : public senscord::Component {
                                 PropertyKeyList* key_list);
 
   /**
-   * @brief Reset the playback settings of all ports synchronous play.
+   * @brief Reset the playback position of all ports synchronous play.
    */
-  void ResetSynchronousPlaySettings();
+  void ResetSynchronousPlayPosition();
 };
 
 #endif  // LIB_COMPONENT_PLAYER_SRC_PLAYER_COMPONENT_H_

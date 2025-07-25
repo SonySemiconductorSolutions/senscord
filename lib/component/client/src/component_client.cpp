@@ -1030,15 +1030,15 @@ senscord::Status ClientComponent::CreateFrameInfo(
     const std::vector<uint8_t>& rawdata = itr->rawdata_info.rawdata;
     if (rawdata.size() > 0) {
       // mapping memory
-      senscord::RawDataMemory rawdata_memory = {};
-      senscord::Status status = alloc_manager_.Mapping(
-          port_id, itr->allocator_key, rawdata, &rawdata_memory);
+      senscord::MemoryContained contained = {};
+      senscord::Status status = alloc_manager_.Mapping(port_id,
+          itr->allocator_key, rawdata, &contained);
       if (!status.ok()) {
         return SENSCORD_STATUS_TRACE(status);
       }
-      channel.data_memory = rawdata_memory.memory;
-      channel.data_size = rawdata_memory.size;
-      channel.data_offset = rawdata_memory.offset;
+      channel.data_memory = contained.memory;
+      channel.data_size = contained.size;
+      channel.data_offset = contained.offset;
 
       // copy to memory
       if (itr->rawdata_info.delivering_mode == senscord::kDeliverAllData) {
@@ -1207,12 +1207,12 @@ senscord::Status ClientComponent::ReleasePortFrameCore(
           itr->data_memory->GetAllocator()->IsMemoryShared();
 
       // unmapping
-      senscord::RawDataMemory rawdata_memory = {};
-      rawdata_memory.memory = itr->data_memory;
-      rawdata_memory.size = itr->data_size;
-      rawdata_memory.offset = itr->data_offset;
+      senscord::MemoryContained contained = {};
+      contained.memory = itr->data_memory;
+      contained.size = itr->data_size;
+      contained.offset = itr->data_offset;
       senscord::Status status_unmap = alloc_manager_.Unmapping(
-          port_id, rawdata_memory);
+          port_id, contained);
       if (status.ok()) {
         status = status_unmap;
       }

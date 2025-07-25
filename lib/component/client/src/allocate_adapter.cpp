@@ -65,7 +65,7 @@ senscord::Status AllocateAdapter::Close() {
  */
 senscord::Status AllocateAdapter::Mapping(
     const std::vector<uint8_t>& serialized,
-    senscord::RawDataMemory* memory) {
+    senscord::MemoryContained* memory) {
   senscord::Status status = allocator_->Mapping(serialized, memory);
   return SENSCORD_STATUS_TRACE(status);
 }
@@ -76,7 +76,7 @@ senscord::Status AllocateAdapter::Mapping(
  * @return Status object.
  */
 senscord::Status AllocateAdapter::Unmapping(
-    const senscord::RawDataMemory& memory) {
+    const senscord::MemoryContained& memory) {
   senscord::Status status = allocator_->Unmapping(memory);
   return SENSCORD_STATUS_TRACE(status);
 }

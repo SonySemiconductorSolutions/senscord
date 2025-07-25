@@ -254,11 +254,6 @@ senscord::Status AudioPcmPlaybackAlsa::Write(senscord::Frame* frame) {
   if (!pimpl_->running) {
     return senscord::Status::OK();
   }
-  if (senscord::AudioPcm::GetByteWidth(pimpl_->params.format) == 0) {
-    return SENSCORD_STATUS_FAIL(
-        kBlockName, senscord::Status::kCauseInvalidArgument,
-        "Invalid format: %d", pimpl_->params.format);
-  }
   senscord::ChannelList list;
   frame->GetChannelList(&list);
   if (list.empty()) {

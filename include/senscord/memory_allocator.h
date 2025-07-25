@@ -38,97 +38,54 @@ class MemoryAllocator : private util::Noncopyable {
   virtual Status Free(Memory* memory) = 0;
 
   /**
-   * @brief Map memory block.
-   * @param[in] (memory) Memory to map.
-   * @return Status object.
-   */
-  virtual Status Map(Memory* memory) {
-    return Status::OK();
-  }
-
-  /**
-   * @brief Unmap memory block.
-   * @param[in] (memory) Memory to unmap.
-   * @return Status object.
-   */
-  virtual Status Unmap(Memory* memory) {
-    return Status::OK();
-  }
-
-#ifdef SENSCORD_SERVER
-  /**
-   * @brief Serialize the raw data memory area.
-   * @param[in] (rawdata_memory) Memory information for raw data.
+   * @brief Serialize from contained memory area.
+   * @param[in] (memory) Contained memory area information.
    * @param[out] (serialized) Serialized memory information.
    * @return Status object.
    */
-  virtual Status ServerSerialize(
-      const RawDataMemory& rawdata_memory,
+  virtual Status Serialize(
+      const MemoryContained& memory,
       std::vector<uint8_t>* serialized) const {
     return Status::OK();
-  }
-  /** @deprecated Use `ServerSerialize` function. */
-  virtual Status Serialize(
-      const RawDataMemory& rawdata_memory,
-      std::vector<uint8_t>* serialized) const {
-    return ServerSerialize(rawdata_memory, serialized);
   }
 
   /**
    * @brief Initialize the mapping area.
    * @return Status object.
    */
-  virtual Status ClientInitMapping() {
-    return Status::OK();
-  }
-  /** @deprecated Use `ClientInitMapping` function. */
   virtual Status InitMapping() {
-    return ClientInitMapping();
+    return Status::OK();
   }
 
   /**
    * @brief Deinitialize the mapping area.
    * @return Status object.
    */
-  virtual Status ClientExitMapping() {
-    return Status::OK();
-  }
-  /** @deprecated Use `ClientExitMapping` function. */
   virtual Status ExitMapping() {
-    return ClientExitMapping();
+    return Status::OK();
   }
 
   /**
    * @brief Mapping memory with serialized memory information.
-   * @param[in] (serialized) Serialized memory information.
-   * @param[out] (rawdata_memory) Memory information for raw data.
+   * @param[in] (serialized) Created from Serialize().
+   * @param[out] (memory) Memory informations.
+   *                      Must to be released with ReleaseMapping().
    * @return Status object.
    */
-  virtual Status ClientMapping(
-      const std::vector<uint8_t>& serialized,
-      RawDataMemory* rawdata_memory) {
-    return Status::OK();
-  }
-  /** @deprecated Use `ClientMapping` function. */
   virtual Status Mapping(
       const std::vector<uint8_t>& serialized,
-      RawDataMemory* rawdata_memory) {
-    return ClientMapping(serialized, rawdata_memory);
+      MemoryContained* memory) {
+    return Status::OK();
   }
 
   /**
    * @brief Release the mapped area.
-   * @param[in] (rawdata_memory) Memory information for raw data.
+   * @param[in] (memory) Mapped memory.
    * @return Status object.
    */
-  virtual Status ClientUnmapping(const RawDataMemory& rawdata_memory) {
+  virtual Status Unmapping(const MemoryContained& memory) {
     return Status::OK();
   }
-  /** @deprecated Use `ClientUnmapping` function. */
-  virtual Status Unmapping(const RawDataMemory& rawdata_memory) {
-    return ClientUnmapping(rawdata_memory);
-  }
-#endif  // SENSCORD_SERVER
 
   /**
    * @brief Invalidate of cache.

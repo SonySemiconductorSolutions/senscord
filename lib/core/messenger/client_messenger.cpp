@@ -408,7 +408,7 @@ void ClientMessenger::RecvThreadCore() {
         ReleaseCommandReply(msg);
         break;
       } else {
-        SENSCORD_LOG_WARNING("%s", status.ToString().c_str());
+        SENSCORD_LOG_WARNING(status.ToString().c_str());
         ReleaseCommandReply(msg);
       }
     } else {
@@ -420,7 +420,7 @@ void ClientMessenger::RecvThreadCore() {
   Status status = connection_->Close();
   SENSCORD_STATUS_TRACE(status);
   if (!status.ok()) {
-    SENSCORD_LOG_WARNING("%s", status.ToString().c_str());
+    SENSCORD_LOG_WARNING(status.ToString().c_str());
   }
 
   // wakeup to all waiting process.

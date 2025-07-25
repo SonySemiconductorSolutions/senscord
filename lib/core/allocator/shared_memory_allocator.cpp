@@ -274,33 +274,32 @@ Status SharedMemoryAllocator::Free(Memory* memory) {
   return status;
 }
 
-#ifdef SENSCORD_SERVER
 /**
- * @brief Serialize the raw data memory area.
- * @param[in] (rawdata_memory) Memory information for raw data.
+ * @brief Serialize from contained memory area.
+ * @param[in] (memory) Contained memory area information.
  * @param[out] (serialized) Serialized memory information.
  * @return Status object.
  */
-Status SharedMemoryAllocator::ServerSerialize(
-      const RawDataMemory& rawdata_memory,
-      std::vector<uint8_t>* serialized) const {
+Status SharedMemoryAllocator::Serialize(
+    const MemoryContained& memory,
+    std::vector<uint8_t>* serialized) const {
   if (serialized == NULL) {
     return SENSCORD_STATUS_FAIL(kStatusBlockCore,
         Status::kCauseInvalidArgument, "serialized == null");
   }
-  if (rawdata_memory.memory == NULL) {
+  if (memory.memory == NULL) {
     return SENSCORD_STATUS_FAIL(kStatusBlockCore,
         Status::kCauseInvalidArgument, "memory == null");
   }
 
   const SharedMemory* shared_memory =
-      static_cast<SharedMemory*>(rawdata_memory.memory);
+      static_cast<SharedMemory*>(memory.memory);
 
   SharedAddressInfo addr = {};
   addr.address.physical_address = shared_memory->GetPhysicalAddress();
   addr.address.allocated_size = static_cast<int32_t>(shared_memory->GetSize());
-  addr.address.offset = static_cast<int32_t>(rawdata_memory.offset);
-  addr.address.size = static_cast<int32_t>(rawdata_memory.size);
+  addr.address.offset = static_cast<int32_t>(memory.offset);
+  addr.address.size = static_cast<int32_t>(memory.size);
   addr.checksum = CalcChecksum(&addr, kSharedAddressInfoSize);
 
   uint8_t* ptr = reinterpret_cast<uint8_t*>(&addr);
@@ -317,7 +316,7 @@ Status SharedMemoryAllocator::ServerSerialize(
  * @brief Initialize the mapping area.
  * @return Status object.
  */
-Status SharedMemoryAllocator::ClientInitMapping() {
+Status SharedMemoryAllocator::InitMapping() {
   // do nothing
   return Status::OK();
 }
@@ -326,21 +325,21 @@ Status SharedMemoryAllocator::ClientInitMapping() {
  * @brief Deinitialize the mapping area.
  * @return Status object.
  */
-Status SharedMemoryAllocator::ClientExitMapping() {
+Status SharedMemoryAllocator::ExitMapping() {
   FreeAll();
   return Status::OK();
 }
 
 /**
  * @brief Mapping memory with serialized memory information.
- * @param[in] (serialized) Serialized memory information.
- * @param[out] (rawdata_memory) Memory information for raw data.
+ * @param[in] (serialized) Created from Serialize().
+ * @param[out] (memory) Memory informations.
+ *                      Must to be released with ReleaseMapping().
  * @return Status object.
  */
-Status SharedMemoryAllocator::ClientMapping(
-    const std::vector<uint8_t>& serialized,
-    RawDataMemory* rawdata_memory) {
-  if (rawdata_memory == NULL) {
+Status SharedMemoryAllocator::Mapping(
+    const std::vector<uint8_t>& serialized, MemoryContained* memory) {
+  if (memory == NULL) {
     return SENSCORD_STATUS_FAIL(kStatusBlockCore,
         Status::kCauseInvalidArgument, "invalid parameter");
   }
@@ -349,16 +348,16 @@ Status SharedMemoryAllocator::ClientMapping(
   SharedAddressInfo info = {};
   if (!CheckSerializedData(serialized, &info)) {
     // allocate.
-    Status status = Allocate(serialized.size(), &rawdata_memory->memory);
+    Status status = Allocate(serialized.size(), &memory->memory);
     if (!status.ok()) {
       return SENSCORD_STATUS_TRACE(status);
     }
 
     const SharedMemory* shared_memory =
-        static_cast<SharedMemory*>(rawdata_memory->memory);
+        static_cast<SharedMemory*>(memory->memory);
 
-    rawdata_memory->offset = 0;
-    rawdata_memory->size = static_cast<size_t>(shared_memory->GetSize());
+    memory->offset = 0;
+    memory->size = static_cast<size_t>(shared_memory->GetSize());
 
     SENSCORD_LOG_DEBUG(
         "[Shared memory] Mapping: phys=%" PRId32 ", size=%" PRIuS ", alloc",
@@ -379,9 +378,9 @@ Status SharedMemoryAllocator::ClientMapping(
   SharedMemory* shared_memory = new SharedMemory(
       reinterpret_cast<uintptr_t>(pointer),
       info.address.physical_address, info.address.allocated_size, this);
-  rawdata_memory->memory = shared_memory;
-  rawdata_memory->offset = static_cast<size_t>(info.address.offset);
-  rawdata_memory->size = static_cast<size_t>(info.address.size);
+  memory->memory = shared_memory;
+  memory->offset = info.address.offset;
+  memory->size = info.address.size;
 
   MappingInfo mapping_info = {};
   mapping_info.offset.offset = info.address.physical_address / block_size_;
@@ -399,15 +398,13 @@ Status SharedMemoryAllocator::ClientMapping(
 
 /**
  * @brief Release the mapped area.
- * @param[in] (rawdata_memory) Memory information for raw data.
+ * @param[in] (memory) Mapped memory.
  * @return Status object.
  */
-Status SharedMemoryAllocator::ClientUnmapping(
-    const RawDataMemory& rawdata_memory) {
-  Status status = Free(rawdata_memory.memory);
+Status SharedMemoryAllocator::Unmapping(const MemoryContained& memory) {
+  Status status = Free(memory.memory);
   return SENSCORD_STATUS_TRACE(status);
 }
-#endif  // SENSCORD_SERVER
 
 /**
  * @brief Whether the memory is shared.

@@ -45,7 +45,6 @@ target_include_directories(
 # Link libraries.
 set(LINK_LIBS)
 ## Add PythonLib
-set(Python_FIND_FRAMEWORK LAST)
 find_package(Python COMPONENTS Interpreter Development REQUIRED)
 message(STATUS "Python version: ${Python_VERSION}")
 message(STATUS "Python include directory: ${Python_INCLUDE_DIRS}")

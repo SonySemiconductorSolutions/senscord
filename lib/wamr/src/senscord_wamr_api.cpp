@@ -7,7 +7,6 @@
 #include <stdint.h>
 #include <pthread.h>
 
-#include <utility>
 #include <sstream>
 
 #include "senscord/status.h"
@@ -15,20 +14,16 @@
 #include "senscord/osal.h"
 #include "senscord/osal_inttypes.h"
 #include "senscord/c_api/senscord_c_api.h"
-#include "senscord/c_api/property_wasm_types.h"
 #include "c_api/c_common.h"
-#include "c_api/c_config.h"
-#include "configuration/configuration_core.h"
 #include "stream/stream_core.h"
 #include "frame/frame_core.h"
 #include "frame/channel_core.h"
 #include "util/resource_list.h"
+#include "util/mutex.h"
+#include "util/autolock.h"
+#include "wasm_allocator/src/wasm_memory_allocator.h"
 #include "src/senscord_wamr_types.h"
 #include "src/senscord_wamr_context.h"
-#include "src/senscord_wamr_util.h"
-#include "src/wasm_allocator_manager.h"
-#include "src/wasm_memory_allocator.h"
-#include "src/wasm_memory.h"
 
 #include "wasm_export.h"
 
@@ -39,18 +34,13 @@
  * @brief Initializes the SensCord native library.
  */
 extern "C" int init_native_lib(void) {
-  int ret = senscord_context_init();
-  if (ret == 0) {
-    senscord::WasmAllocatorManager::CreateInstance();
-  }
-  return ret;
+  return senscord_context_init();
 }
 
 /**
  * @brief Exits the SensCord native library.
  */
 extern "C" void deinit_native_lib(void) {
-  senscord::WasmAllocatorManager::DeleteInstance();
   senscord_context_exit();
 }
 
@@ -119,6 +109,65 @@ class WasmBlockingOperation {
   senscord_stream_t stream_;
 };
 
+/**
+ * @brief WASM heap.
+ */
+class WasmHeap : public senscord::ResourceData {
+ public:
+  WasmHeap() : inst_(), wasm_address_() {}
+
+  ~WasmHeap() {
+    Free();
+  }
+
+  /**
+   * @brief Duplicate native data to WASM heap.
+   * @param[in] inst  WASM module instance.
+   * @param[in] buffer  Native data.
+   * @param[in] size  Size of native data.
+   */
+  senscord::Status DuplicateData(
+      wasm_module_inst_t inst, const void* buffer, uint32_t size) {
+    SENSCORD_STATUS_ARGUMENT_CHECK(buffer == NULL);
+    if (wasm_address_ != 0) {
+      return SENSCORD_STATUS_FAIL(
+          kBlockName, senscord::Status::kCauseInvalidOperation,
+          "already allocated memory.");
+    }
+    wasm_addr_t address = wasm_runtime_module_dup_data(
+        inst, reinterpret_cast<const char*>(buffer), size);
+    if (address == 0) {
+      return SENSCORD_STATUS_FAIL(
+          kBlockName, senscord::Status::kCauseResourceExhausted,
+          "wasm_runtime_module_dup_data() failed. size=%" PRIu32, size);
+    }
+    inst_ = inst;
+    wasm_address_ = address;
+    return senscord::Status::OK();
+  }
+
+  /**
+   * @brief Free the WASM heap.
+   */
+  void Free() {
+    if (wasm_address_ != 0) {
+      wasm_runtime_module_free(inst_, wasm_address_);
+      wasm_address_ = 0;
+    }
+  }
+
+  /**
+   * @brief Get the WASM address.
+   */
+  wasm_addr_t GetWasmAddress() const {
+    return wasm_address_;
+  }
+
+ private:
+  wasm_module_inst_t inst_;
+  wasm_addr_t wasm_address_;
+};
+
 /* =============================================================
  * Status APIs
  * ============================================================= */
@@ -151,83 +200,6 @@ int32_t senscord_get_last_error_string_wrapper(
  * ============================================================= */
 
 /**
- * @brief Change allocator configuration.
- *
- * Find instance's allocator key="wasm" and change to the following:
- *   allocator name="type.port" (overwrite)
- *   allocator key="wasm.instance_name.type.port" (overwrite)
- *   allocator type="wasm_allocator"
- */
-void ChangeAllocatorConfig(senscord_config_t config) {
-  senscord::c_api::ConfigHandle* handle =
-      senscord::c_api::ToPointer<senscord::c_api::ConfigHandle*>(config);
-  senscord::ConfigurationCore* config_core =
-      reinterpret_cast<senscord::ConfigurationCore*>(handle->config);
-  senscord::CoreConfig core_config = config_core->GetConfig();
-
-  // Get the `instance_name`, including the allocator key="wasm".
-  std::map<std::string, senscord::ComponentInstanceConfig*> instance_list;
-  for (std::vector<senscord::ComponentInstanceConfig>::iterator
-      inst_itr = core_config.instance_list.begin(),
-      inst_end = core_config.instance_list.end();
-      inst_itr != inst_end; ++inst_itr) {
-    senscord::ComponentInstanceConfig& inst = *inst_itr;
-    for (std::map<std::string, std::string>::iterator
-        alloc_itr = inst.allocator_key_list.begin(),
-        alloc_end = inst.allocator_key_list.end();
-        alloc_itr != alloc_end; ) {
-      if (alloc_itr->second == "wasm") {  // key="wasm"
-        instance_list.insert(std::make_pair(inst.instance_name, &inst));
-        // Add unique key after deleting.
-        inst.allocator_key_list.erase(alloc_itr++);
-      } else {
-        ++alloc_itr;
-      }
-    }
-  }
-
-  // Get the `type` and `port` that match the `instance_name`.
-  for (std::vector<senscord::StreamSetting>::const_iterator
-      stream_itr = core_config.stream_list.begin(),
-      stream_end = core_config.stream_list.end();
-      stream_itr != stream_end; ++stream_itr) {
-    const senscord::StreamSetting& stream = *stream_itr;
-    std::map<std::string, senscord::ComponentInstanceConfig*>::iterator
-        inst_itr = instance_list.find(stream.radical_address.instance_name);
-    if (inst_itr != instance_list.end()) {
-      std::string allocator_name;
-      {
-        std::ostringstream buf;
-        buf << stream.radical_address.port_type << '.'
-            << stream.radical_address.port_id;
-        allocator_name = buf.str();
-      }
-      std::string allocator_key;
-      {
-        std::ostringstream buf;
-        buf << "wasm." << inst_itr->first << '.' << allocator_name;
-        allocator_key = buf.str();
-      }
-      // Update instance's allocator.
-      inst_itr->second->allocator_key_list.insert(
-          std::make_pair(allocator_name, allocator_key));
-      // Add allocator.
-      senscord::AllocatorConfig allocator_config = {};
-      allocator_config.key = allocator_key;
-      allocator_config.type = kAllocatorTypeWasm;
-      allocator_config.cacheable = false;
-      allocator_config.arguments["stream_key"] = stream.stream_key;
-      core_config.allocator_list.push_back(allocator_config);
-      SENSCORD_LOG_INFO_TAGGED(
-          kBlockName, "wasm allocator: key=%s, name=%s",
-          allocator_key.c_str(), allocator_name.c_str());
-    }
-  }
-
-  config_core->SetConfig(core_config);
-}
-
-/**
  * @brief Initialize core.
  */
 int32_t InitCore(
@@ -238,16 +210,27 @@ int32_t InitCore(
   senscord_core_t* core = ToNativePointer<senscord_core_t*>(inst, core_addr);
   int32_t ret = 0;
 
-  ChangeAllocatorConfig(config);
+  // Add a default allocator to config object
+  ret = senscord_config_add_allocator(
+      config, SENSCORD_CONFIG_DEFAULT_ALLOCATOR_KEY,
+      kAllocatorTypeWasm, 0);
+  if (ret == 0) {
+    std::ostringstream buf;
+    buf << reinterpret_cast<uint64_t>(exec_env);
+    senscord_config_add_allocator_argument(
+        config, SENSCORD_CONFIG_DEFAULT_ALLOCATOR_KEY,
+        senscord::kArgumentWasmExecEnv, buf.str().c_str());
+  }
 
   ret = senscord_core_init_with_config(core, config);
   if (ret == 0) {
     ret = senscord_context_set_core(
         exec_env, *core, SENSCORD_CONTEXT_OP_ENTER);
     if (ret != 0) {
-      senscord::Status status = *c_api::GetLastError();
       senscord_core_exit(*core);
-      c_api::SetLastError(status);
+      c_api::SetLastError(SENSCORD_STATUS_FAIL(
+          kBlockName, senscord::Status::kCauseResourceExhausted,
+          "wasm_runtime_spawn_thread() failed."));
     }
   }
   return ret;
@@ -275,7 +258,6 @@ int32_t senscord_core_init_with_config_wrapper(
     wasm_exec_env_t exec_env,
     wasm_addr_t core_addr,
     senscord_config_t config) {
-  SENSCORD_C_API_ARGUMENT_CHECK(config == 0);
   WasmBlockingOperation blocking_op(exec_env);
   if (!blocking_op.GetResult()) {
     return -1;
@@ -356,20 +338,26 @@ int32_t senscord_core_get_version_wrapper(
   return -1;
 }
 
-/** @brief Resource for stream allocator */
-const char kWasmStreamAllocator[] = "wasm_stream_allocator";
-
-struct WasmStreamAllocator : public senscord::ResourceData {
-  std::string stream_key;
-  wasm_module_inst_t module_inst;
-
-  WasmStreamAllocator() : stream_key(), module_inst() {}
-
-  ~WasmStreamAllocator() {
-    senscord::WasmAllocatorManager::GetInstance()->UnregisterWasm(
-        stream_key, module_inst);
+/** senscord_core_open_stream */
+int32_t senscord_core_open_stream_wrapper(
+    wasm_exec_env_t exec_env,
+    senscord_core_t core,
+    const char* stream_key,
+    wasm_addr_t stream_addr) {
+  WasmBlockingOperation blocking_op(exec_env);
+  if (!blocking_op.GetResult()) {
+    return -1;
   }
-};
+  wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+  senscord_stream_t* stream =
+      ToNativePointer<senscord_stream_t*>(inst, stream_addr);
+  int32_t ret = senscord_core_open_stream(core, stream_key, stream);
+  if (ret == 0) {
+    senscord_context_set_stream(
+        exec_env, *stream, core, SENSCORD_CONTEXT_OP_ENTER);
+  }
+  return ret;
+}
 
 /** senscord_core_open_stream_with_setting */
 int32_t senscord_core_open_stream_with_setting_wrapper(
@@ -390,37 +378,10 @@ int32_t senscord_core_open_stream_with_setting_wrapper(
   int32_t ret = senscord_core_open_stream_with_setting(
       core, stream_key, setting, stream);
   if (ret == 0) {
-    senscord::Status status =
-        senscord::WasmAllocatorManager::GetInstance()->RegisterWasm(
-            stream_key, inst);
-    if (status.ok()) {
-      senscord_context_set_stream(
-          exec_env, *stream, core, SENSCORD_CONTEXT_OP_ENTER);
-      // for UnregisterWasm
-      senscord::StreamCore* stream_ptr =
-          c_api::ToPointer<senscord::StreamCore*>(*stream);
-      WasmStreamAllocator* wasm_stream_allocator =
-          stream_ptr->GetResources()->Create<WasmStreamAllocator>(
-              kWasmStreamAllocator);
-      wasm_stream_allocator->stream_key = stream_key;
-      wasm_stream_allocator->module_inst = inst;
-    } else {
-      senscord_core_close_stream(core, *stream);
-      c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
-      ret = -1;
-    }
+    senscord_context_set_stream(
+        exec_env, *stream, core, SENSCORD_CONTEXT_OP_ENTER);
   }
   return ret;
-}
-
-/** senscord_core_open_stream */
-int32_t senscord_core_open_stream_wrapper(
-    wasm_exec_env_t exec_env,
-    senscord_core_t core,
-    const char* stream_key,
-    wasm_addr_t stream_addr) {
-  return senscord_core_open_stream_with_setting_wrapper(
-      exec_env, core, stream_key, 0, stream_addr);
 }
 
 /** senscord_core_close_stream */
@@ -444,93 +405,27 @@ int32_t senscord_core_close_stream_wrapper(
  * Stream APIs
  * ============================================================= */
 
-/**
- * @brief Check the stream allocator.
- */
-bool CheckStreamAllocator(
-    wasm_exec_env_t exec_env, senscord_stream_t stream) {
-  SENSCORD_C_API_ARGUMENT_CHECK(stream == 0);
-  const char* stream_key = senscord_stream_get_key(stream);
-  SENSCORD_C_API_ARGUMENT_CHECK(stream_key == NULL);
-  wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
-  senscord::WasmAllocatorState state =
-      senscord::WasmAllocatorManager::GetInstance()->GetAllocatorState(
-          stream_key, inst);
-  if (state == senscord::kNotOwnedWasm) {
-    c_api::SetLastError(SENSCORD_STATUS_FAIL(
-        kBlockName, senscord::Status::kCausePermissionDenied,
-        "Stream API is restricted."));
-    return false;
-  }
-  return true;
-}
-
 /** senscord_stream_start */
 int32_t senscord_stream_start_wrapper(
     wasm_exec_env_t exec_env,
     senscord_stream_t stream) {
-  if (!CheckStreamAllocator(exec_env, stream)) {
-    return -1;
-  }
   WasmBlockingOperation blocking_op(exec_env);
   if (!blocking_op.GetResult()) {
     return -1;
   }
-  int32_t ret = senscord_context_set_stream_running(
-      exec_env, stream, SENSCORD_CONTEXT_OP_ENTER);
-  if (ret == 0) {
-    ret = senscord_stream_start(stream);
-    if (ret != 0) {
-      senscord::Status status = *c_api::GetLastError();
-      senscord_context_set_stream_running(
-          exec_env, stream, SENSCORD_CONTEXT_OP_EXIT);
-      c_api::SetLastError(status);
-    }
-  }
-  return ret;
+  return senscord_stream_start(stream);
 }
 
 /** senscord_stream_stop */
 int32_t senscord_stream_stop_wrapper(
     wasm_exec_env_t exec_env,
     senscord_stream_t stream) {
-  if (!CheckStreamAllocator(exec_env, stream)) {
-    return -1;
-  }
   WasmBlockingOperation blocking_op(exec_env);
   if (!blocking_op.GetResult()) {
     return -1;
   }
-  int32_t ret = senscord_stream_stop(stream);
-  if (ret == 0) {
-    senscord_context_set_stream_running(
-        exec_env, stream, SENSCORD_CONTEXT_OP_EXIT);
-  }
-  return ret;
+  return senscord_stream_stop(stream);
 }
-
-/** @brief Resource for frame memory */
-const char kWasmFrameMemory[] = "wasm_frame_memory";
-
-struct WasmFrameMemory : public senscord::ResourceData {
-  senscord_frame_memory_t frame_memory;
-  senscord_context_memory_t frame_type;
-  senscord_context_memory_t user_data;
-
-  WasmFrameMemory() : frame_memory(), frame_type(), user_data() {}
-
-  ~WasmFrameMemory() {
-    if (frame_memory != 0) {
-      senscord_context_release_frame_memory(frame_memory);
-    }
-    if (frame_type != 0) {
-      senscord_context_free_memory(frame_type);
-    }
-    if (user_data != 0) {
-      senscord_context_free_memory(user_data);
-    }
-  }
-};
 
 /** senscord_stream_get_frame */
 int32_t senscord_stream_get_frame_wrapper(
@@ -538,9 +433,6 @@ int32_t senscord_stream_get_frame_wrapper(
     senscord_stream_t stream,
     wasm_addr_t frame_addr,
     int32_t timeout_msec) {
-  if (!CheckStreamAllocator(exec_env, stream)) {
-    return -1;
-  }
   WasmBlockingOperation blocking_op(exec_env, stream);
   if (!blocking_op.GetResult()) {
     return -1;
@@ -548,31 +440,15 @@ int32_t senscord_stream_get_frame_wrapper(
   wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
   senscord_frame_t* frame =
       ToNativePointer<senscord_frame_t*>(inst, frame_addr);
-  int32_t ret = senscord_stream_get_frame(stream, frame, timeout_msec);
-  if (ret == 0) {
-    senscord_frame_memory_t frame_memory = 0;
-    ret = senscord_context_reserve_frame_memory(
-        exec_env, *frame, &frame_memory);
-    if (ret == 0) {
-      senscord::FrameCore* frame_ptr =
-          c_api::ToPointer<senscord::FrameCore*>(*frame);
-      WasmFrameMemory* wasm_frame_memory =
-          frame_ptr->GetResources()->Create<WasmFrameMemory>(
-              kWasmFrameMemory);
-      wasm_frame_memory->frame_memory = frame_memory;
-    }
-  }
-  return ret;
+  return senscord_stream_get_frame(stream, frame, timeout_msec);
 }
+
 
 /** senscord_stream_release_frame */
 int32_t senscord_stream_release_frame_wrapper(
     wasm_exec_env_t exec_env,
     senscord_stream_t stream,
     senscord_frame_t frame) {
-  if (!CheckStreamAllocator(exec_env, stream)) {
-    return -1;
-  }
   WasmBlockingOperation blocking_op(exec_env);
   if (!blocking_op.GetResult()) {
     return -1;
@@ -585,9 +461,6 @@ int32_t senscord_stream_release_frame_unused_wrapper(
     wasm_exec_env_t exec_env,
     senscord_stream_t stream,
     senscord_frame_t frame) {
-  if (!CheckStreamAllocator(exec_env, stream)) {
-    return -1;
-  }
   WasmBlockingOperation blocking_op(exec_env);
   if (!blocking_op.GetResult()) {
     return -1;
@@ -600,9 +473,6 @@ int32_t senscord_stream_clear_frames_wrapper(
     wasm_exec_env_t exec_env,
     senscord_stream_t stream,
     wasm_addr_t frame_number_addr) {
-  if (!CheckStreamAllocator(exec_env, stream)) {
-    return -1;
-  }
   WasmBlockingOperation blocking_op(exec_env);
   if (!blocking_op.GetResult()) {
     return -1;
@@ -624,23 +494,6 @@ int32_t senscord_stream_get_property_wrapper(
     return -1;
   }
   wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
-  if ((strcmp(property_key, SENSCORD_WASM_MEMORY_POOL_PROPERTY_KEY) == 0) &&
-      (value_size == sizeof(senscord_wasm_memory_pool_property_t))) {
-    senscord_wasm_memory_pool_property_t* memory_pool =
-        ToNativePointer<senscord_wasm_memory_pool_property_t*>(
-            inst, value_addr);
-    SENSCORD_C_API_ARGUMENT_CHECK(memory_pool == NULL);
-    memory_pool->num = 0;
-    memory_pool->size = 0;
-    senscord_wasm_memory_pool_info_t info = {};
-    int32_t ret = senscord_context_get_memory_pool_info(
-        exec_env, stream, &info);
-    if (ret == 0) {
-      memory_pool->num = info.num;
-      memory_pool->size = info.size;
-    }
-    return ret;
-  }
   void* value = ToNativePointer<void*>(inst, value_addr);
   return senscord_stream_get_property(stream, property_key, value, value_size);
 }
@@ -657,44 +510,6 @@ int32_t senscord_stream_set_property_wrapper(
     return -1;
   }
   wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
-  if ((strcmp(property_key, SENSCORD_WASM_MEMORY_POOL_PROPERTY_KEY) == 0) &&
-      (value_size == sizeof(senscord_wasm_memory_pool_property_t))) {
-    senscord_wasm_memory_pool_property_t* memory_pool =
-        ToNativePointer<senscord_wasm_memory_pool_property_t*>(
-            inst, value_addr);
-    SENSCORD_C_API_ARGUMENT_CHECK(memory_pool == NULL);
-    if (memory_pool->num != 0) {
-      // num != 0 : enable memory pool
-      // check MemoryAllocator
-      const char* stream_key = senscord_stream_get_key(stream);
-      SENSCORD_C_API_ARGUMENT_CHECK(stream_key == NULL);
-      senscord::WasmAllocatorState state =
-          senscord::WasmAllocatorManager::GetInstance()->GetAllocatorState(
-              stream_key, inst);
-      if (state != senscord::kNotWasm) {
-        c_api::SetLastError(SENSCORD_STATUS_FAIL(
-            kBlockName, senscord::Status::kCauseInvalidOperation,
-            "Unsupported allocator."));
-        return -1;
-      }
-      // check FrameBuffering
-      senscord::StreamCore* stream_ptr =
-          c_api::ToPointer<senscord::StreamCore*>(stream);
-      senscord::FrameBuffering frame_buffering =
-          stream_ptr->GetInitialSetting().frame_buffering;
-      if (frame_buffering.buffering == senscord::kBufferingOn) {
-        if ((frame_buffering.num > 0) &&
-            (memory_pool->num > static_cast<uint32_t>(frame_buffering.num))) {
-          memory_pool->num = static_cast<uint32_t>(frame_buffering.num);
-        }
-      }
-    } else {
-      // num == 0 : disable memory pool
-      memory_pool->size = 0;
-    }
-    return senscord_context_set_memory_pool(
-        exec_env, stream, memory_pool->num, memory_pool->size);
-  }
   const void* value = ToNativePointer<void*>(inst, value_addr);
   return senscord_stream_set_property(stream, property_key, value, value_size);
 }
@@ -833,17 +648,14 @@ struct WasmFrameCallbackParam {
 const char kWasmFrameCallback[] = "wasm_frame_callback";
 
 struct WasmFrameCallback : public senscord::ResourceData {
-  senscord::osal::OSMutex* mutex;
+  senscord::util::Mutex mutex;
   WasmFrameCallbackParam* param;
 
   WasmFrameCallback() : mutex(), param() {
-    senscord::osal::OSCreateMutex(&mutex);
   }
 
   ~WasmFrameCallback() {
     delete param;
-    senscord::osal::OSDestroyMutex(mutex);
-    mutex = NULL;
   }
 };
 
@@ -856,7 +668,11 @@ void OnFrameReceived(
       reinterpret_cast<WasmFrameCallbackParam*>(private_data);
 
   if (param->exec_env != NULL) {
-    WasmThreadEnv _env;
+    bool thread_env_inited = false;
+    if (!wasm_runtime_thread_env_inited()) {
+      thread_env_inited = wasm_runtime_init_thread_env();
+    }
+
     senscord_stream_t stream_handle = c_api::ToHandle(stream);
     uint32_t argv[3];
     // argv[0]-[1]: 64bit stream handle
@@ -874,6 +690,10 @@ void OnFrameReceived(
         param->exec_env = NULL;
       }
     }
+
+    if (thread_env_inited) {
+      wasm_runtime_destroy_thread_env();
+    }
   }
 
   if (param->exec_env == NULL) {
@@ -889,9 +709,7 @@ int32_t senscord_stream_register_frame_callback_wrapper(
     senscord_stream_t stream,
     wasm_addr_t callback_addr,
     wasm_addr_t private_data) {
-  if (!CheckStreamAllocator(exec_env, stream)) {
-    return -1;
-  }
+  SENSCORD_C_API_ARGUMENT_CHECK(stream == 0);
   SENSCORD_C_API_ARGUMENT_CHECK(callback_addr == 0);
   WasmBlockingOperation blocking_op(exec_env);
   if (!blocking_op.GetResult()) {
@@ -927,7 +745,7 @@ int32_t senscord_stream_register_frame_callback_wrapper(
     }
 
     // Releases the old parameter and sets new parameter.
-    LockGuard _lock(frame_callback->mutex);
+    senscord::util::AutoLock _lock(&frame_callback->mutex);
     delete frame_callback->param;
     frame_callback->param = param;
   }
@@ -939,9 +757,7 @@ int32_t senscord_stream_register_frame_callback_wrapper(
 int32_t senscord_stream_unregister_frame_callback_wrapper(
     wasm_exec_env_t exec_env,
     senscord_stream_t stream) {
-  if (!CheckStreamAllocator(exec_env, stream)) {
-    return -1;
-  }
+  SENSCORD_C_API_ARGUMENT_CHECK(stream == 0);
   WasmBlockingOperation blocking_op(exec_env);
   if (!blocking_op.GetResult()) {
     return -1;
@@ -988,11 +804,10 @@ typedef std::map<std::string, WasmEventCallbackParam*> WasmEventCallbackList;
 const char kWasmEventCallback[] = "wasm_event_callback";
 
 struct WasmEventCallback : public senscord::ResourceData {
-  senscord::osal::OSMutex* mutex;
+  senscord::util::Mutex mutex;
   WasmEventCallbackList list;
 
   WasmEventCallback() : mutex(), list() {
-    senscord::osal::OSCreateMutex(&mutex);
   }
 
   ~WasmEventCallback() {
@@ -1000,8 +815,6 @@ struct WasmEventCallback : public senscord::ResourceData {
         itr = list.begin(), end = list.end(); itr != end; ++itr) {
       delete itr->second;
     }
-    senscord::osal::OSDestroyMutex(mutex);
-    mutex = NULL;
   }
 };
 
@@ -1015,11 +828,16 @@ void OnEventReceived(
       reinterpret_cast<WasmEventCallbackParam*>(private_data);
 
   if (param->exec_env != NULL) {
-    WasmThreadEnv _env;
+    bool thread_env_inited = false;
+    if (!wasm_runtime_thread_env_inited()) {
+      thread_env_inited = wasm_runtime_init_thread_env();
+    }
+
     bool ret = false;
     {
       wasm_module_inst_t inst = wasm_runtime_get_module_inst(param->exec_env);
-      wasm_addr_t type_heap = wasm_runtime_module_dup_data(
+      WasmHeap type_heap;
+      type_heap.DuplicateData(
           inst, event_type.c_str(), event_type.size() + 1);
 
       if (param->callback_addr != 0) {
@@ -1030,7 +848,7 @@ void OnEventReceived(
         senscord::osal::OSMemcpy(
             &argv[0], sizeof(uint32_t) * 2,
             &stream_handle, sizeof(senscord_stream_t));
-        argv[2] = type_heap;
+        argv[2] = type_heap.GetWasmAddress();
         // argv[3]-[4]: 64bit event argument handle
         senscord::osal::OSMemcpy(
             &argv[3], sizeof(uint32_t) * 2,
@@ -1040,15 +858,11 @@ void OnEventReceived(
             param->exec_env, param->callback_addr, 6, argv);
       } else if (param->callback_old_addr != 0) {
         uint32_t argv[3];
-        argv[0] = type_heap;
+        argv[0] = type_heap.GetWasmAddress();
         argv[1] = 0;  // reserved
         argv[2] = param->private_data;
         ret = wasm_runtime_call_indirect(
             param->exec_env, param->callback_old_addr, 3, argv);
-      }
-
-      if (type_heap != 0) {
-        wasm_runtime_module_free(inst, type_heap);
       }
     }
     if (!ret) {
@@ -1058,6 +872,10 @@ void OnEventReceived(
       if (wasm_cluster_is_thread_terminated(param->exec_env)) {
         param->exec_env = NULL;
       }
+    }
+
+    if (thread_env_inited) {
+      wasm_runtime_destroy_thread_env();
     }
   }
 
@@ -1117,7 +935,7 @@ int32_t RegisterEventCallback(
     }
 
     // Releases the old parameter and sets new parameter.
-    LockGuard _lock(event_callback->mutex);
+    senscord::util::AutoLock _lock(&event_callback->mutex);
     std::pair<WasmEventCallbackList::iterator, bool> ret =
         event_callback->list.insert(std::make_pair(event_type, param));
     if (!ret.second) {
@@ -1177,7 +995,7 @@ int32_t senscord_stream_unregister_event_callback_wrapper(
     }
 
     // Releases the registered parameter.
-    LockGuard _lock(event_callback->mutex);
+    senscord::util::AutoLock _lock(&event_callback->mutex);
     WasmEventCallbackList::iterator itr =
         event_callback->list.find(event_type);
     if (itr != event_callback->list.end()) {
@@ -1228,18 +1046,20 @@ int32_t senscord_frame_get_type_wrapper(
       c_api::ToPointer<senscord::FrameCore*>(frame);
   {
     // frame_type
-    WasmFrameMemory* frame_memory =
-        frame_ptr->GetResources()->Get<WasmFrameMemory>(kWasmFrameMemory);
-    if (frame_memory->frame_type == 0) {
-      const std::string& frame_type = frame_ptr->GetParentStream()->GetType();
-      uint32_t type_size = static_cast<uint32_t>(frame_type.size() + 1);
-      int32_t ret = senscord_context_duplicate_memory(
-          exec_env, frame_type.c_str(), type_size, &frame_memory->frame_type);
-      if (ret != 0) {
-        return ret;
+    const char* kResourceFrameType = "wasm_frame_type";
+    const std::string& frame_type = frame_ptr->GetType();
+    uint32_t type_size = static_cast<uint32_t>(frame_type.size() + 1);
+    WasmHeap* heap =
+        frame_ptr->GetResources()->Create<WasmHeap>(kResourceFrameType);
+    if ((heap->GetWasmAddress() == 0) && (type_size != 0)) {
+      senscord::Status status =
+          heap->DuplicateData(inst, frame_type.c_str(), type_size);
+      if (!status.ok()) {
+        c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
+        return -1;
       }
     }
-    *type_addr = senscord_context_get_wasm_address(frame_memory->frame_type);
+    *type_addr = heap->GetWasmAddress();
   }
   return 0;
 }
@@ -1255,24 +1075,6 @@ int32_t senscord_frame_get_channel_count_wrapper(
   return senscord_frame_get_channel_count(frame, channel_count);
 }
 
-/** @brief Resource for channel memory */
-const char kWasmChannelMemory[] = "wasm_channel_memory";
-
-struct WasmChannelMemory : public senscord::ResourceData {
-  senscord_frame_t parent_frame;
-  senscord_wasm_memory_area_t area;
-  senscord_context_memory_t raw_data_type;
-  uint64_t timestamp;
-
-  WasmChannelMemory() : parent_frame(), area(), raw_data_type(), timestamp() {}
-
-  ~WasmChannelMemory() {
-    if (raw_data_type != 0) {
-      senscord_context_free_memory(raw_data_type);
-    }
-  }
-};
-
 /** senscord_frame_get_channel */
 int32_t senscord_frame_get_channel_wrapper(
     wasm_exec_env_t exec_env,
@@ -1282,16 +1084,7 @@ int32_t senscord_frame_get_channel_wrapper(
   wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
   senscord_channel_t* channel =
       ToNativePointer<senscord_channel_t*>(inst, channel_addr);
-  int32_t ret = senscord_frame_get_channel(frame, index, channel);
-  if (ret == 0) {
-    senscord::ChannelCore* channel_ptr =
-        c_api::ToPointer<senscord::ChannelCore*>(*channel);
-    WasmChannelMemory* channel_memory =
-        channel_ptr->GetResources()->Create<WasmChannelMemory>(
-            kWasmChannelMemory);
-    channel_memory->parent_frame = frame;
-  }
-  return ret;
+  return senscord_frame_get_channel(frame, index, channel);
 }
 
 /** senscord_frame_get_channel_from_channel_id */
@@ -1303,17 +1096,8 @@ int32_t senscord_frame_get_channel_from_channel_id_wrapper(
   wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
   senscord_channel_t* channel =
       ToNativePointer<senscord_channel_t*>(inst, channel_addr);
-  int32_t ret = senscord_frame_get_channel_from_channel_id(
+  return senscord_frame_get_channel_from_channel_id(
       frame, channel_id, channel);
-  if (ret == 0) {
-    senscord::ChannelCore* channel_ptr =
-        c_api::ToPointer<senscord::ChannelCore*>(*channel);
-    WasmChannelMemory* channel_memory =
-        channel_ptr->GetResources()->Create<WasmChannelMemory>(
-            kWasmChannelMemory);
-    channel_memory->parent_frame = frame;
-  }
-  return ret;
 }
 
 /** senscord_frame_get_user_data */
@@ -1338,25 +1122,21 @@ int32_t senscord_frame_get_user_data_wrapper(
     }
   }
 
-  if ((tmp_user_data.address != NULL) && (tmp_user_data.size != 0)) {
-    WasmFrameMemory* frame_memory =
-        frame_ptr->GetResources()->Get<WasmFrameMemory>(kWasmFrameMemory);
-    if (frame_memory->user_data == 0) {
-      int32_t ret = senscord_context_duplicate_memory(
-          exec_env, tmp_user_data.address, tmp_user_data.size,
-          &frame_memory->user_data);
-      if (ret != 0) {
-        return ret;
+  {
+    const char* kResourceUserData = "wasm_user_data";
+    WasmHeap* heap =
+        frame_ptr->GetResources()->Create<WasmHeap>(kResourceUserData);
+    if ((heap->GetWasmAddress() == 0) && (tmp_user_data.size != 0)) {
+      senscord::Status status =
+          heap->DuplicateData(inst, tmp_user_data.address, tmp_user_data.size);
+      if (!status.ok()) {
+        c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
+        return -1;
       }
     }
-    user_data->address_addr =
-        senscord_context_get_wasm_address(frame_memory->user_data);
+    user_data->address_addr = heap->GetWasmAddress();
     user_data->size = static_cast<wasm_size_t>(tmp_user_data.size);
-  } else {
-    user_data->address_addr = 0;
-    user_data->size = 0;
   }
-
   return 0;
 }
 
@@ -1374,6 +1154,50 @@ int32_t senscord_channel_get_channel_id_wrapper(
   return senscord_channel_get_channel_id(channel, channel_id);
 }
 
+int32_t senscord_channel_get_raw_data_handle_wrapper(
+    wasm_exec_env_t exec_env,
+    senscord_channel_t channel,
+    wasm_addr_t raw_data_addr) {
+
+  SENSCORD_C_API_ARGUMENT_CHECK(channel == 0);
+  wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+  senscord_raw_data_handle_t* raw_data =
+      ToNativePointer<senscord_raw_data_handle_t*>(inst, raw_data_addr);
+  SENSCORD_C_API_ARGUMENT_CHECK(raw_data == NULL);
+  senscord::ChannelCore* channel_ptr =
+      c_api::ToPointer<senscord::ChannelCore*>(channel);
+  senscord::Channel::RawData tmp_raw_data = {};
+  {
+    senscord::Status status = channel_ptr->GetRawData(&tmp_raw_data);
+    if (!status.ok()) {
+      c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
+      return -1;
+    }
+  }
+  raw_data->address = reinterpret_cast<uint64_t>(tmp_raw_data.address);
+  raw_data->size = static_cast<wasm_size_t>(tmp_raw_data.size);
+  raw_data->timestamp = tmp_raw_data.timestamp;
+  {
+    // raw_data_type
+    const char* kResourceRawDataType = "handle_data_type";
+    uint32_t type_size = static_cast<uint32_t>(tmp_raw_data.type.size() + 1);
+    WasmHeap* heap =
+        channel_ptr->GetResources()->Create<WasmHeap>(kResourceRawDataType);
+    if ((heap->GetWasmAddress() == 0) && (type_size != 0)) {
+      senscord::Status status =
+          heap->DuplicateData(inst, tmp_raw_data.type.c_str(), type_size);
+      if (!status.ok()) {
+        c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
+        return -1;
+      }
+    }
+    uintptr_t wasm_address = static_cast<uintptr_t>(heap->GetWasmAddress());
+    raw_data->type = reinterpret_cast<char*>(wasm_address);
+  }
+  return 0;
+}
+
+
 /** senscord_channel_get_raw_data */
 int32_t senscord_channel_get_raw_data_wrapper(
     wasm_exec_env_t exec_env,
@@ -1387,56 +1211,64 @@ int32_t senscord_channel_get_raw_data_wrapper(
 
   senscord::ChannelCore* channel_ptr =
       c_api::ToPointer<senscord::ChannelCore*>(channel);
-  WasmChannelMemory* channel_memory =
-      channel_ptr->GetResources()->Create<WasmChannelMemory>(
-          kWasmChannelMemory);
-  if (channel_memory->area.memory == 0) {
-    senscord::Channel::RawData tmp_raw_data = {};
+  senscord::Channel::RawData tmp_raw_data = {};
+  {
     senscord::Status status = channel_ptr->GetRawData(&tmp_raw_data);
     if (!status.ok()) {
       c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
       return -1;
     }
-    senscord::RawDataMemory rawdata_mem = {};
-    channel_ptr->GetRawDataMemory(&rawdata_mem);
-    std::string allocator_type;
-    if (rawdata_mem.memory != NULL) {
-      allocator_type = rawdata_mem.memory->GetAllocator()->GetType();
-    }
-    // memory, offset, size
-    if (allocator_type == kAllocatorTypeWasm) {
-      channel_memory->area.memory = c_api::ToHandle(rawdata_mem.memory);
-      channel_memory->area.offset = static_cast<uint32_t>(rawdata_mem.offset);
-      channel_memory->area.size = static_cast<uint32_t>(rawdata_mem.size);
-    } else {
-      int32_t ret = senscord_context_get_channel_memory(
-          exec_env, channel_memory->parent_frame, channel,
-          &channel_memory->area);
-      if (ret != 0) {
-        return ret;
-      }
-    }
-    // raw data type
-    if (channel_memory->raw_data_type == 0) {
-      uint32_t type_size = static_cast<uint32_t>(tmp_raw_data.type.size() + 1);
-      int32_t ret = senscord_context_duplicate_memory(
-          exec_env, tmp_raw_data.type.c_str(), type_size,
-          &channel_memory->raw_data_type);
-      if (ret != 0) {
-        return ret;
-      }
-    }
-    // timestamp
-    channel_memory->timestamp = tmp_raw_data.timestamp;
   }
-  senscord::WasmMemory* wasm_memory =
-      c_api::ToPointer<senscord::WasmMemory*>(channel_memory->area.memory);
-  raw_data->address_addr = static_cast<uint32_t>(
-      wasm_memory->GetWasmAddress() + channel_memory->area.offset);
-  raw_data->size = channel_memory->area.size;
-  raw_data->type_addr =
-      senscord_context_get_wasm_address(channel_memory->raw_data_type);
-  raw_data->timestamp = channel_memory->timestamp;
+
+  senscord::MemoryContained memory = {};
+  channel_ptr->GetRawDataMemory(&memory);
+  std::string allocator_type;
+  if (memory.memory != NULL) {
+    allocator_type = memory.memory->GetAllocator()->GetType();
+  }
+
+  if (allocator_type == kAllocatorTypeWasm) {
+    senscord::WasmMemory* wasm_memory =
+        reinterpret_cast<senscord::WasmMemory*>(memory.memory);
+    raw_data->address_addr =
+        static_cast<uint32_t>(wasm_memory->GetWasmAddress() + memory.offset);
+    raw_data->size = static_cast<uint32_t>(tmp_raw_data.size);
+    raw_data->type_addr = 0;
+    raw_data->timestamp = tmp_raw_data.timestamp;
+  } else {
+    // duplicate rawdata
+    const char* kResourceRawData = "wasm_raw_data";
+    WasmHeap* heap =
+        channel_ptr->GetResources()->Create<WasmHeap>(kResourceRawData);
+    if ((heap->GetWasmAddress() == 0) && (tmp_raw_data.size != 0)) {
+      senscord::Status status =
+          heap->DuplicateData(inst, tmp_raw_data.address, tmp_raw_data.size);
+      if (!status.ok()) {
+        c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
+        return -1;
+      }
+    }
+    raw_data->address_addr = heap->GetWasmAddress();
+    raw_data->size = static_cast<wasm_size_t>(tmp_raw_data.size);
+    raw_data->type_addr = 0;
+    raw_data->timestamp = tmp_raw_data.timestamp;
+  }
+  {
+    // raw_data_type
+    const char* kResourceRawDataType = "wasm_raw_data_type";
+    uint32_t type_size = static_cast<uint32_t>(tmp_raw_data.type.size() + 1);
+    WasmHeap* heap =
+        channel_ptr->GetResources()->Create<WasmHeap>(kResourceRawDataType);
+    if ((heap->GetWasmAddress() == 0) && (type_size != 0)) {
+      senscord::Status status =
+          heap->DuplicateData(inst, tmp_raw_data.type.c_str(), type_size);
+      if (!status.ok()) {
+        c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
+        return -1;
+      }
+    }
+    raw_data->type_addr = heap->GetWasmAddress();
+  }
   return 0;
 }
 
@@ -1947,6 +1779,7 @@ NativeSymbol kNativeSymbols[] = {
     // Channel
     EXPORT_WASM_API_WITH_SIG2(senscord_channel_get_channel_id, "(Ii)i"),
     EXPORT_WASM_API_WITH_SIG2(senscord_channel_get_raw_data, "(Ii)i"),
+    EXPORT_WASM_API_WITH_SIG2(senscord_channel_get_raw_data_handle, "(Ii)i"),
     EXPORT_WASM_API_WITH_SIG2(senscord_channel_convert_rawdata, "(Iii)i"),
     EXPORT_WASM_API_WITH_SIG2(senscord_channel_get_property, "(I$ii)i"),
     EXPORT_WASM_API_WITH_SIG2(senscord_channel_get_property_count, "(Ii)i"),

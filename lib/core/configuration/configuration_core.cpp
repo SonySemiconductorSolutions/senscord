@@ -712,14 +712,6 @@ const CoreConfig& ConfigurationCore::GetConfig() const {
 }
 
 /**
- * @brief Set cofiguration.
- */
-void ConfigurationCore::SetConfig(const CoreConfig& config) {
-  util::AutoLock lock(&mutex_);
-  local_config_ = config;
-}
-
-/**
  * @brief Initialize configuration.
  * @return Status object.
  */

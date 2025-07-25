@@ -312,35 +312,14 @@ Status StreamSourceAdapter::GetAllocator(
     return SENSCORD_STATUS_FAIL(kStatusBlockCore, Status::kCauseInvalidArgument,
         "allocator is NULL");
   }
-  MemoryAllocator* result = NULL;
-  if (name == kAllocatorNameDefault) {
-    std::ostringstream buf;
-    buf << port_->GetPortType() << '.' << port_->GetPortId();
-    std::map<std::string, MemoryAllocator*>::const_iterator itr =
-        component_args_.allocators.find(buf.str());
-    if (itr != component_args_.allocators.end()) {
-      result = itr->second;
-    }
+  std::map<std::string, MemoryAllocator*>::const_iterator itr =
+      component_args_.allocators.find(name);
+  if (itr != component_args_.allocators.end()) {
+    *allocator = itr->second;
+  } else {
+    return SENSCORD_STATUS_FAIL(kStatusBlockCore, Status::kCauseNotFound,
+        "no allocator is existed by %s", name.c_str());
   }
-  if (result == NULL) {
-    std::map<std::string, MemoryAllocator*>::const_iterator itr =
-        component_args_.allocators.find(name);
-    if (itr != component_args_.allocators.end()) {
-      result = itr->second;
-    }
-  }
-  if (result == NULL) {
-    if (name == kAllocatorNameDefault) {
-      MemoryManager::GetInstance()->GetAllocator(
-          kAllocatorDefaultKey, &result);
-    }
-  }
-  if (result == NULL) {
-    return SENSCORD_STATUS_FAIL(
-        kStatusBlockCore, Status::kCauseNotFound,
-        "Allocator does not exist. (name='%s')", name.c_str());
-  }
-  *allocator = result;
   return Status::OK();
 }
 

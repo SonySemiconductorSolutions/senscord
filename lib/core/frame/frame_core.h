@@ -109,16 +109,16 @@ class FrameCore : public Frame {
   bool IsMaskedChannel(uint32_t channel_id) const;
 
   /**
-   * @brief Get parent stream. (for C API)
-   * @return Parent stream.
-   */
-  const StreamCore* GetParentStream() const { return parent_stream_; }
-
-  /**
    * @brief Get frame information.
    * @return Frame information.
    */
   const FrameInfo& GetFrameInfo() const { return frame_info_; }
+
+  /**
+   * @brief Get type. (for C API)
+   * @return Type of this frame.
+   */
+  const std::string& GetType() const { return parent_stream_->GetType(); }
 
   /**
    * @brief Get channel list.
