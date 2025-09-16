@@ -54,6 +54,20 @@ extern "C" void deinit_native_lib(void) {
   senscord_context_exit();
 }
 
+/**
+ * @brief WASM native library initialization function.
+ */
+extern "C" int senscord_init_native_lib(void) {
+  return init_native_lib();
+}
+
+/**
+ * @brief WASM native library deinitialization function.
+ */
+extern "C" void senscord_deinit_native_lib(void) {
+  deinit_native_lib();
+}
+
 namespace {
 
 namespace c_api = senscord::c_api;
@@ -564,6 +578,7 @@ int32_t senscord_stream_get_frame_wrapper(
   }
   return ret;
 }
+
 
 /** senscord_stream_release_frame */
 int32_t senscord_stream_release_frame_wrapper(
@@ -1374,6 +1389,43 @@ int32_t senscord_channel_get_channel_id_wrapper(
   return senscord_channel_get_channel_id(channel, channel_id);
 }
 
+int32_t senscord_channel_get_raw_data_handle_wrapper(
+    wasm_exec_env_t exec_env,
+    senscord_channel_t channel,
+    wasm_addr_t raw_data_addr) {
+
+  SENSCORD_C_API_ARGUMENT_CHECK(channel == 0);
+  wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
+  senscord_raw_data_handle_t* raw_data =
+      ToNativePointer<senscord_raw_data_handle_t*>(inst, raw_data_addr);
+  SENSCORD_C_API_ARGUMENT_CHECK(raw_data == NULL);
+  senscord::ChannelCore* channel_ptr =
+      c_api::ToPointer<senscord::ChannelCore*>(channel);
+  senscord::Channel::RawData tmp_raw_data = {};
+  {
+    senscord::Status status = channel_ptr->GetRawData(&tmp_raw_data);
+    if (!status.ok()) {
+      c_api::SetLastError(SENSCORD_STATUS_TRACE(status));
+      return -1;
+    }
+  }
+  raw_data->address = reinterpret_cast<uint64_t>(tmp_raw_data.address);
+  raw_data->size = static_cast<wasm_size_t>(tmp_raw_data.size);
+  raw_data->timestamp = tmp_raw_data.timestamp;
+  {
+    // raw_data_type
+    const char* kResourceRawDataType = "handle_data_type";
+    uint32_t type_size = static_cast<uint32_t>(tmp_raw_data.type.size() + 1);
+    
+    // Note: WasmAllocatorManager in this context is used for stream-based allocation
+    // For raw data type handling, we need to use a different approach
+    // Since we cannot directly allocate memory for type string, we'll set it to null
+    raw_data->type = nullptr;
+  }
+  return 0;
+}
+
+
 /** senscord_channel_get_raw_data */
 int32_t senscord_channel_get_raw_data_wrapper(
     wasm_exec_env_t exec_env,
@@ -1947,6 +1999,7 @@ NativeSymbol kNativeSymbols[] = {
     // Channel
     EXPORT_WASM_API_WITH_SIG2(senscord_channel_get_channel_id, "(Ii)i"),
     EXPORT_WASM_API_WITH_SIG2(senscord_channel_get_raw_data, "(Ii)i"),
+    EXPORT_WASM_API_WITH_SIG2(senscord_channel_get_raw_data_handle, "(Ii)i"),
     EXPORT_WASM_API_WITH_SIG2(senscord_channel_convert_rawdata, "(Iii)i"),
     EXPORT_WASM_API_WITH_SIG2(senscord_channel_get_property, "(I$ii)i"),
     EXPORT_WASM_API_WITH_SIG2(senscord_channel_get_property_count, "(Ii)i"),

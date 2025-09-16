@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <sdk>
-  <version name="project name" major="1" minor="11" patch="1" description=""/>
+  <version name="project name" major="1" minor="11" patch="1" description="EDC"/>
   <!--  Defining the streams to use -->
   <streams>
     <!-- player stream -->
