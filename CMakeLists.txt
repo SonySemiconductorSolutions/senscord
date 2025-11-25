@@ -335,6 +335,9 @@ endif()
 ################################################################################
 # Others
 
+## AITRIOS specific features
+option(SENSCORD_AITRIOS_SPECIFIC_ENABLED "Enables AITRIOS specific features." OFF)
+
 ## Build sample
 option(SENSCORD_SAMPLE "Enables the sample source."
        OFF)
@@ -447,6 +450,7 @@ endif()
 if(DEFINED SENSCORD_USE_BUNDLED_MSGPACK)
   message(STATUS "** SENSCORD_USE_BUNDLED_MSGPACK   -> ${SENSCORD_USE_BUNDLED_MSGPACK}")
 endif()
+message(STATUS "* SENSCORD_AITRIOS_SPECIFIC_ENABLED -> ${SENSCORD_AITRIOS_SPECIFIC_ENABLED}")
 message(STATUS "* SENSCORD_SAMPLE                 -> ${SENSCORD_SAMPLE}")
 message(STATUS "* SENSCORD_INSTALL_CONFIG         -> ${SENSCORD_INSTALL_CONFIG}")
 
@@ -618,6 +622,10 @@ else()
         -Wall -Wextra -Wconversion -Wpedantic -Wshadow
         -Wno-unused-parameter)
   endif()
+endif()
+
+if(SENSCORD_AITRIOS_SPECIFIC_ENABLED)
+  add_definitions(-DAITRIOS_SPECIFIC)
 endif()
 
 # Enable project specific utility.

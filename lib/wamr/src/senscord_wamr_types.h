@@ -24,4 +24,12 @@ struct senscord_raw_data_wasm_t {
   uint64_t timestamp;
 };
 
+#ifdef AITRIOS_SPECIFIC
+struct senscord_raw_data_handle_t {
+  uint64_t address;   /**< virtual address */
+  uint64_t size;      /**< data size */
+  const char *type;   /**< data type*/
+  uint64_t timestamp; /**< nanoseconds timestamp captured by the device */
+};
+#endif  // AITRIOS_SPECIFIC
 #endif  // LIB_WAMR_SRC_SENSCORD_WAMR_TYPES_H_
