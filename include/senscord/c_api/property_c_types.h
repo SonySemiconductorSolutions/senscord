@@ -21,7 +21,12 @@
 /** Length of the stream key string. */
 #define SENSCORD_STREAM_KEY_LENGTH      (64)
 /** Length of the raw data type string. */
-#define SENSCORD_RAWDATA_TYPE_LENGTH    (64)
+// TODO: Temporarily force to use AITRIOS_SPECIFIC definition.
+// #ifdef AITRIOS_SPECIFIC
+#define SENSCORD_RAWDATA_TYPE_LENGTH    (16)
+// #else
+// #define SENSCORD_RAWDATA_TYPE_LENGTH    (64)
+// #endif
 /** Length of the pixel format string. */
 #define SENSCORD_PIXEL_FORMAT_LENGTH    (64)
 /** Length of the recorder format string. */
@@ -36,7 +41,11 @@
 #define SENSCORD_RECORD_DATE_LENGTH     (32)
 
 /** Maximum number of channel list. */
-#define SENSCORD_CHANNEL_LIST_MAX       (128)
+// #ifdef AITRIOS_SPECIFIC
+#define SENSCORD_CHANNEL_LIST_MAX       (8)
+// #else
+// #define SENSCORD_CHANNEL_LIST_MAX       (128)
+// #endif
 /** Maximum number of preset list. */
 #define SENSCORD_PRESET_LIST_MAX        (64)
 /** Maximum number of recorder format list. */
@@ -47,7 +56,11 @@
 #define SENSCORD_RECORD_NAME_RULE_LIST_MAX  (8)
 
 /** Length of description string of channel. */
-#define SENSCORD_CHANNEL_DESCRIPTION_LENGTH (128)
+// #ifdef AITRIOS_SPECIFIC
+#define SENSCORD_CHANNEL_DESCRIPTION_LENGTH (32)
+// #else
+// #define SENSCORD_CHANNEL_DESCRIPTION_LENGTH (128)
+// #endif
 /** Length of description string of preset. */
 #define SENSCORD_PRESET_DESCRIPTION_LENGTH  (128)
 /** Length of description string of temperature. */
