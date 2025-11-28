@@ -1377,6 +1377,29 @@ Status StreamCore::Get(
         Status::kCauseInvalidArgument, "property is null");
   }
 
+#ifdef AITRIOS_SPECIFIC
+  // Get state from server via adapter
+#ifdef SENSCORD_SERIALIZE
+  void* output_property = NULL;
+  size_t output_property_size = 0;
+  Status status = adapter_->GetSerializedProperty(
+      config_.address.port_type, config_.address.port_id,
+      this, property_key, NULL, 0, &output_property, &output_property_size);
+  if (status.ok()) {
+    serialize::Decoder decoder(output_property, output_property_size);
+    status = decoder.Pop(*property);
+    adapter_->ReleaseSerializedProperty(
+        config_.address.port_type, config_.address.port_id,
+        property_key, output_property, output_property_size);
+  }
+  return SENSCORD_STATUS_TRACE(status);
+#else
+  Status status = adapter_->GetProperty(
+      config_.address.port_type, config_.address.port_id,
+      this, property_key, property);
+  return SENSCORD_STATUS_TRACE(status);
+#endif  // SENSCORD_SERIALIZE
+#else
   StreamLocalState state = GetLocalState();
   // Translate from local state to public state.
   switch (state) {
@@ -1393,6 +1416,7 @@ Status StreamCore::Get(
       break;
   }
   return Status::OK();
+#endif  // AITRIOS_SPECIFIC
 }
 
 /**

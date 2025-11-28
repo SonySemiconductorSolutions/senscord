@@ -1944,7 +1944,9 @@ senscord::Status ClientComponent::RegisterPortProperties(
     // remove the stream property
     if ((key != senscord::kStreamTypePropertyKey) &&
         (key != senscord::kStreamKeyPropertyKey) &&
+#ifndef AITRIOS_SPECIFIC
         (key != senscord::kStreamStatePropertyKey) &&
+#endif
         (key != senscord::kFrameBufferingPropertyKey) &&
         (key != senscord::kCurrentFrameNumPropertyKey) &&
         (key != senscord::kRecordPropertyKey) &&
