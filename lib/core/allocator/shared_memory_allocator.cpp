@@ -175,6 +175,13 @@ Status SharedMemoryAllocator::Exit() {
   // close memory object.
   object_->Close();
 
+  // remove name from duplicate check list.
+  if (!memory_name_.empty()) {
+    std::string name = memory_name_.substr(strlen(kSharedMemoryNamePrefix));
+    memory_names_.erase(name);
+    memory_name_.clear();
+  }
+
   return Status::OK();
 }
 
